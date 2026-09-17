@@ -16,6 +16,7 @@ export interface SandboxRuntimeSettings {
   network: {
     allowedDomains: string[];
     deniedDomains: string[];
+    strictAllowlist: boolean;
     allowUnixSockets: string[];
     allowAllUnixSockets: boolean;
     allowLocalBinding: boolean;
@@ -40,17 +41,19 @@ export function buildSandboxRuntimeSettings(options: {
   network: IsolationPreparationContext["network"];
   userHome: string;
 }): SandboxRuntimeSettings {
+  // Sandbox Runtime deliberately rejects "*" in an allowlist. Public mode
+  // uses an empty list here and an explicit approval callback in our runner;
+  // the runtime's resolved-address guard still blocks local/metadata targets.
   const allowedDomains =
-    options.network.mode === "public"
-      ? ["*"]
-      : options.network.mode === "allowlist"
-        ? options.network.allowedDomains
-        : [];
+    options.network.mode === "allowlist"
+      ? options.network.allowedDomains
+      : [];
 
   return {
     network: {
       allowedDomains,
-      deniedDomains: [],
+      deniedDomains: options.network.mode === "deny" ? ["*"] : [],
+      strictAllowlist: options.network.mode !== "public",
       allowUnixSockets: [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
@@ -174,7 +177,7 @@ class PreparedSandboxRuntimeIsolation implements PreparedIsolation {
 
   constructor(
     private readonly nodeExecutable: string,
-    private readonly cliPath: string,
+    private readonly runnerPath: string,
     private readonly configPath: string,
     readOnlyPaths: string[],
     readWritePaths: string[],
@@ -194,9 +197,11 @@ class PreparedSandboxRuntimeIsolation implements PreparedIsolation {
       ...launchSpec,
       command: this.nodeExecutable,
       args: [
-        this.cliPath,
+        this.runnerPath,
         "--settings",
         this.configPath,
+        "--network-mode",
+        this.effective.networkMode,
         "--",
         launchSpec.command,
         ...launchSpec.args,
@@ -218,15 +223,12 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
         "Enforced isolation currently requires a Node.js executable on PATH",
       );
     }
-    const cliPath = resolve(
+    const runnerPath = resolve(
       this.context.applicationRoot,
-      "node_modules",
-      "@anthropic-ai",
-      "sandbox-runtime",
       "dist",
-      "cli.js",
+      "sandbox-runner.mjs",
     );
-    await access(cliPath, constants.R_OK);
+    await access(runnerPath, constants.R_OK);
 
     const readOnlyPaths = [...new Set(this.context.readOnlyPaths)];
     const readWritePaths = [
@@ -252,7 +254,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
 
     return new PreparedSandboxRuntimeIsolation(
       nodeExecutable,
-      cliPath,
+      runnerPath,
       this.context.runtime.sandboxConfig,
       readOnlyPaths,
       readWritePaths,

@@ -10,6 +10,7 @@ import {
   buildSandboxRuntimeSettings,
   SandboxRuntimeIsolationBackend,
 } from "../src/main/isolation/sandbox-runtime.js";
+import { allowsPublicDestination } from "../src/main/isolation/public-network.js";
 
 const executeFile = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -30,7 +31,47 @@ afterEach(async () => {
 });
 
 describe("sandbox policy", () => {
-  it("generates a valid deny-by-default write policy", () => {
+  it.each([
+    {
+      mode: "public" as const,
+      allowedDomains: [],
+      expectedAllowed: [],
+      expectedDenied: [],
+      strictAllowlist: false,
+    },
+    {
+      mode: "deny" as const,
+      allowedDomains: [],
+      expectedAllowed: [],
+      expectedDenied: ["*"],
+      strictAllowlist: true,
+    },
+    {
+      mode: "allowlist" as const,
+      allowedDomains: ["api.github.com"],
+      expectedAllowed: ["api.github.com"],
+      expectedDenied: [],
+      strictAllowlist: true,
+    },
+  ])(
+    "generates a valid $mode network policy",
+    ({ mode, allowedDomains, expectedAllowed, expectedDenied, strictAllowlist }) => {
+      const settings = buildSandboxRuntimeSettings({
+        deniedReadPaths: ["/Users", "/private/tmp"],
+        readOnlyPaths: ["/workspace/docs"],
+        readWritePaths: ["/workspace/app", "/private/tmp/capsule"],
+        network: { mode, allowedDomains },
+        userHome: "/Users/example",
+      });
+
+      expect(() => SandboxRuntimeConfigSchema.parse(settings)).not.toThrow();
+      expect(settings.network.allowedDomains).toEqual(expectedAllowed);
+      expect(settings.network.deniedDomains).toEqual(expectedDenied);
+      expect(settings.network.strictAllowlist).toBe(strictAllowlist);
+    },
+  );
+
+  it("generates a deny-by-default write policy", () => {
     const settings = buildSandboxRuntimeSettings({
       deniedReadPaths: ["/Users", "/private/tmp"],
       readOnlyPaths: ["/workspace/docs"],
@@ -52,9 +93,23 @@ describe("sandbox policy", () => {
     expect(settings.filesystem.denyWrite).toContain(
       "/Users/example/.claude/debug",
     );
-    expect(settings.network.allowedDomains).toEqual(["api.github.com"]);
     expect(settings.network.allowAllUnixSockets).toBe(false);
     expect(settings.allowAppleEvents).toBe(false);
+  });
+
+  it.each([
+    ["example.com", true],
+    ["8.8.8.8", true],
+    ["localhost", false],
+    ["service.localhost", false],
+    ["127.0.0.1", false],
+    ["127.1", false],
+    ["169.254.169.254", false],
+    ["100.100.100.200", false],
+    ["::1", false],
+    ["fd00:ec2::254", false],
+  ])("applies public-network safety checks to %s", (host, expected) => {
+    expect(allowsPublicDestination({ host, port: 443 })).toBe(expected);
   });
 });
 
