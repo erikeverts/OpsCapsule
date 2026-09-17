@@ -1,0 +1,5 @@
+# Default owner for the repository.
+* @erikeverts
+
+# Keep repository governance under explicit ownership.
+/.github/ @erikeverts
