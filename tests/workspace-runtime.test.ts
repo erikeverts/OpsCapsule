@@ -1,12 +1,15 @@
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { stringify } from "yaml";
+import { CloudAdapterRegistry } from "../src/main/cloud-adapters/registry.js";
 import {
   buildWorkspaceEnvironment,
+  cleanupWorkspaceRuntime,
   createWorkspaceRuntime,
 } from "../src/main/runtime-directory.js";
-import { WORKSPACES } from "../src/main/workspaces.js";
+import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
 
 const temporaryDirectories: string[] = [];
 
@@ -19,53 +22,166 @@ afterEach(async () => {
 });
 
 describe("workspace runtime isolation", () => {
-  it("creates a separate kubeconfig and environment for every workspace", async () => {
-    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-test-"));
+  it("creates separate runtime homes, temp directories, and kubeconfigs", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-runtime-"));
     temporaryDirectories.push(baseDirectory);
-    const [atlas, borealis] = WORKSPACES;
-
-    expect(atlas).toBeDefined();
-    expect(borealis).toBeDefined();
-
-    const atlasRuntime = await createWorkspaceRuntime(baseDirectory, atlas!);
-    const borealisRuntime = await createWorkspaceRuntime(baseDirectory, borealis!);
-    const atlasEnvironment = buildWorkspaceEnvironment(atlasRuntime, atlas!, {
-      PATH: "/test/bin",
-    });
-    const borealisEnvironment = buildWorkspaceEnvironment(
-      borealisRuntime,
-      borealis!,
-      { PATH: "/test/bin" },
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const development = await registry.resolveTarget("atlas", "development");
+    const production = await registry.resolveTarget("atlas", "production");
+    const developmentRuntime = await createWorkspaceRuntime(
+      baseDirectory,
+      "development-session",
+      development,
+    );
+    const productionRuntime = await createWorkspaceRuntime(
+      baseDirectory,
+      "production-session",
+      production,
+    );
+    const cloudAdapters = new CloudAdapterRegistry();
+    const developmentEnvironment = buildWorkspaceEnvironment(
+      developmentRuntime,
+      development,
+      cloudAdapters,
+      { PATH: "/test/bin", AWS_ACCESS_KEY_ID: "must-not-leak" },
+    );
+    const productionEnvironment = buildWorkspaceEnvironment(
+      productionRuntime,
+      production,
+      cloudAdapters,
+      { PATH: "/test/bin", AWS_PROFILE: "wrong-profile" },
     );
 
-    expect(atlasRuntime.kubeconfig).not.toBe(borealisRuntime.kubeconfig);
-    expect(atlasEnvironment.KUBECONFIG).toBe(atlasRuntime.kubeconfig);
-    expect(borealisEnvironment.KUBECONFIG).toBe(borealisRuntime.kubeconfig);
-    expect(atlasEnvironment.AWS_PROFILE).toBe("atlas-prod");
-    expect(borealisEnvironment.AWS_PROFILE).toBe("borealis-stage");
+    expect(developmentRuntime.home).not.toBe(productionRuntime.home);
+    expect(developmentRuntime.temp).not.toBe(productionRuntime.temp);
+    expect(developmentEnvironment.HOME).toBe(developmentRuntime.home);
+    expect(developmentEnvironment.TMPDIR).toBe(developmentRuntime.temp);
+    expect(developmentEnvironment.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(developmentEnvironment.AWS_PROFILE).toBe("atlas-nonprod");
+    expect(productionEnvironment.AWS_PROFILE).toBe("atlas-prod");
 
-    const atlasConfig = await readFile(atlasRuntime.kubeconfig, "utf8");
-    const borealisConfig = await readFile(borealisRuntime.kubeconfig, "utf8");
-    expect(atlasConfig).toContain("current-context: atlas-prod");
-    expect(borealisConfig).toContain("current-context: borealis-stage");
-  });
-
-  it("does not allow one capsule's kubeconfig changes to affect another", async () => {
-    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-test-"));
-    temporaryDirectories.push(baseDirectory);
-    const [atlas, borealis] = WORKSPACES;
-    const atlasRuntime = await createWorkspaceRuntime(baseDirectory, atlas!);
-    const borealisRuntime = await createWorkspaceRuntime(baseDirectory, borealis!);
-    const originalBorealisConfig = await readFile(
-      borealisRuntime.kubeconfig,
+    const developmentConfig = await readFile(
+      developmentRuntime.kubeconfig,
       "utf8",
     );
-
-    await writeFile(atlasRuntime.kubeconfig, "current-context: changed\n", "utf8");
-
-    expect(await readFile(borealisRuntime.kubeconfig, "utf8")).toBe(
-      originalBorealisConfig,
+    const productionConfig = await readFile(
+      productionRuntime.kubeconfig,
+      "utf8",
     );
+    expect(developmentConfig).toContain("current-context: atlas-development");
+    expect(productionConfig).toContain("current-context: atlas-production");
+
+    await writeFile(developmentRuntime.kubeconfig, "current-context: changed\n");
+    expect(await readFile(productionRuntime.kubeconfig, "utf8")).toBe(
+      productionConfig,
+    );
+
+    await Promise.all([
+      cleanupWorkspaceRuntime(developmentRuntime),
+      cleanupWorkspaceRuntime(productionRuntime),
+    ]);
+  });
+
+  it("extracts only the Kubernetes context selected by a target", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-kube-"));
+    temporaryDirectories.push(baseDirectory);
+    const configDirectory = join(baseDirectory, "config", "workspaces");
+    const projectDirectory = join(baseDirectory, "project");
+    const sourceKubeconfig = join(baseDirectory, "source-kubeconfig.yaml");
+    await Promise.all([
+      mkdir(configDirectory, { recursive: true }),
+      mkdir(projectDirectory, { recursive: true }),
+    ]);
+    await writeFile(
+      sourceKubeconfig,
+      stringify({
+        apiVersion: "v1",
+        kind: "Config",
+        clusters: [
+          { name: "dev-cluster", cluster: { server: "https://dev.invalid" } },
+          {
+            name: "prod-cluster",
+            cluster: { server: "https://prod.invalid" },
+          },
+        ],
+        contexts: [
+          {
+            name: "development",
+            context: { cluster: "dev-cluster", user: "dev-user" },
+          },
+          {
+            name: "production",
+            context: { cluster: "prod-cluster", user: "prod-user" },
+          },
+        ],
+        users: [
+          { name: "dev-user", user: { token: "dev-token" } },
+          { name: "prod-user", user: { token: "prod-token" } },
+        ],
+      }),
+    );
+    await writeFile(
+      join(configDirectory, "custom.yaml"),
+      stringify({
+        apiVersion: "opscapsule.dev/v1alpha1",
+        kind: "Workspace",
+        metadata: { id: "custom", name: "Custom" },
+        cloudConnections: [],
+        kubernetesContexts: [
+          {
+            id: "production",
+            name: "Production",
+            namespace: "platform",
+            source: {
+              type: "kubeconfig",
+              path: sourceKubeconfig,
+              context: "production",
+            },
+          },
+        ],
+        directories: [
+          {
+            id: "project",
+            name: "Project",
+            path: projectDirectory,
+            access: "read-write",
+          },
+        ],
+        targets: [
+          {
+            id: "production",
+            name: "Production",
+            environment: "production",
+            risk: "production",
+            kubernetesContext: "production",
+            directories: ["project"],
+            defaultDirectory: "project",
+            agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
+            isolation: {
+              mode: "context-only",
+              network: { mode: "deny", allowedDomains: [] },
+            },
+          },
+        ],
+      }),
+    );
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const target = await registry.resolveTarget("custom", "production");
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "custom-session",
+      target,
+    );
+
+    const extracted = await readFile(runtime.kubeconfig, "utf8");
+    expect(extracted).toContain("current-context: production");
+    expect(extracted).toContain("https://prod.invalid");
+    expect(extracted).toContain("prod-token");
+    expect(extracted).not.toContain("https://dev.invalid");
+    expect(extracted).not.toContain("dev-token");
+
+    await cleanupWorkspaceRuntime(runtime);
   });
 });
-

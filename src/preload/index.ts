@@ -8,8 +8,8 @@ import { IPC } from "../shared/ipc.js";
 
 const api: OpsCapsuleApi = {
   listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces),
-  startWorkspace: (workspaceId) =>
-    ipcRenderer.invoke(IPC.startWorkspace, { workspaceId }),
+  startWorkspace: (workspaceId, targetId) =>
+    ipcRenderer.invoke(IPC.startWorkspace, { workspaceId, targetId }),
   writeTerminal: (sessionId, terminalId, data) =>
     ipcRenderer.invoke(IPC.terminalWrite, { sessionId, terminalId, data }),
   resizeTerminal: (sessionId, terminalId, cols, rows) =>
@@ -36,4 +36,3 @@ const api: OpsCapsuleApi = {
 };
 
 contextBridge.exposeInMainWorld("opsCapsule", Object.freeze(api));
-

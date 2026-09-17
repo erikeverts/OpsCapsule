@@ -1,20 +1,30 @@
 import { randomUUID } from "node:crypto";
+import { realpath } from "node:fs/promises";
 import * as pty from "node-pty";
 import type {
   RuntimePaths,
   TerminalDataEvent,
   TerminalDescriptor,
   TerminalExitEvent,
-  WorkspaceDefinition,
   WorkspaceSession,
 } from "../shared/contracts.js";
+import type { PreparedIsolation } from "./isolation/types.js";
 import { CommandRuntimeAdapter } from "./runtime-adapters/command.js";
 import type { ProcessLaunchSpec } from "./runtime-adapters/types.js";
-import { buildWorkspaceEnvironment } from "./runtime-directory.js";
+import {
+  buildWorkspaceEnvironment,
+  cleanupWorkspaceRuntime,
+} from "./runtime-directory.js";
+import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 
 interface TerminalRecord {
   sessionId: string;
   process: pty.IPty;
+}
+
+interface SessionRecord {
+  terminalIds: Set<string>;
+  runtime: RuntimePaths;
 }
 
 interface TerminalEvents {
@@ -24,16 +34,22 @@ interface TerminalEvents {
 
 export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>();
-  private readonly sessions = new Map<string, Set<string>>();
+  private readonly sessions = new Map<string, SessionRecord>();
 
   constructor(private readonly events: TerminalEvents) {}
 
-  startWorkspace(
-    workspace: WorkspaceDefinition,
+  createSessionId(): string {
+    return randomUUID();
+  }
+
+  async startWorkspace(
+    sessionId: string,
+    resolvedTarget: ResolvedWorkspaceTarget,
     runtime: RuntimePaths,
-  ): WorkspaceSession {
-    const sessionId = randomUUID();
-    const environment = buildWorkspaceEnvironment(runtime, workspace);
+    isolation: PreparedIsolation,
+  ): Promise<WorkspaceSession> {
+    const environment = buildWorkspaceEnvironment(runtime, resolvedTarget);
+    const cwd = await realpath(resolvedTarget.defaultDirectory.path);
     const shellDefinition = {
       adapter: "command" as const,
       command: "$SHELL",
@@ -45,22 +61,43 @@ export class TerminalManager {
       { id: randomUUID(), title: "Shell B", kind: "shell" },
     ];
 
-    this.sessions.set(sessionId, new Set());
+    this.sessions.set(sessionId, { terminalIds: new Set(), runtime });
 
-    for (const terminal of terminals) {
-      const definition =
-        terminal.kind === "agent" ? workspace.agentRuntime : shellDefinition;
-      const adapter = new CommandRuntimeAdapter(definition);
-      const launchSpec = adapter.buildLaunchSpec({
-        workspace,
-        runtime,
-        environment,
-        role: terminal.kind,
-      });
-      this.spawnTerminal(sessionId, terminal.id, launchSpec);
+    try {
+      for (const terminal of terminals) {
+        const definition =
+          terminal.kind === "agent"
+            ? resolvedTarget.target.agentRuntime
+            : shellDefinition;
+        const adapter = new CommandRuntimeAdapter(definition);
+        const launchSpec = adapter.buildLaunchSpec({
+          runtime,
+          environment,
+          role: terminal.kind,
+          cwd,
+        });
+        this.spawnTerminal(
+          sessionId,
+          terminal.id,
+          isolation.wrap(launchSpec),
+        );
+      }
+    } catch (error) {
+      await this.stopSession(sessionId);
+      throw error;
     }
 
-    return { id: sessionId, workspace, runtime, terminals };
+    return {
+      id: sessionId,
+      workspace: {
+        id: resolvedTarget.workspace.manifest.metadata.id,
+        name: resolvedTarget.workspace.manifest.metadata.name,
+      },
+      target: resolvedTarget.summary,
+      runtime,
+      isolation: isolation.effective,
+      terminals,
+    };
   }
 
   write(sessionId: string, terminalId: string, data: string): void {
@@ -76,23 +113,24 @@ export class TerminalManager {
     this.getTerminal(sessionId, terminalId).process.resize(cols, rows);
   }
 
-  stopSession(sessionId: string): void {
-    const terminalIds = this.sessions.get(sessionId);
-    if (!terminalIds) {
+  async stopSession(sessionId: string): Promise<void> {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
       return;
     }
 
-    for (const terminalId of terminalIds) {
+    for (const terminalId of session.terminalIds) {
       this.terminals.get(terminalId)?.process.kill();
       this.terminals.delete(terminalId);
     }
     this.sessions.delete(sessionId);
+    await cleanupWorkspaceRuntime(session.runtime);
   }
 
-  stopAll(): void {
-    for (const sessionId of [...this.sessions.keys()]) {
-      this.stopSession(sessionId);
-    }
+  async stopAll(): Promise<void> {
+    await Promise.all(
+      [...this.sessions.keys()].map((sessionId) => this.stopSession(sessionId)),
+    );
   }
 
   private spawnTerminal(
@@ -109,7 +147,7 @@ export class TerminalManager {
     });
 
     this.terminals.set(terminalId, { sessionId, process });
-    this.sessions.get(sessionId)?.add(terminalId);
+    this.sessions.get(sessionId)?.terminalIds.add(terminalId);
 
     process.onData((data) => {
       this.events.data({ sessionId, terminalId, data });
@@ -117,7 +155,7 @@ export class TerminalManager {
     process.onExit(({ exitCode }) => {
       this.events.exit({ sessionId, terminalId, exitCode });
       this.terminals.delete(terminalId);
-      this.sessions.get(sessionId)?.delete(terminalId);
+      this.sessions.get(sessionId)?.terminalIds.delete(terminalId);
     });
   }
 

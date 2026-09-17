@@ -7,11 +7,18 @@ import {
   terminalWriteInput,
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
-import { createWorkspaceRuntime } from "./runtime-directory.js";
+import { prepareIsolation } from "./isolation/prepare.js";
+import {
+  cleanupStaleWorkspaceRuntimes,
+  cleanupWorkspaceRuntime,
+  createWorkspaceRuntime,
+} from "./runtime-directory.js";
 import { TerminalManager } from "./terminal-manager.js";
-import { getWorkspace, WORKSPACES } from "./workspaces.js";
+import { WorkspaceRegistry } from "./workspace-registry.js";
 
 let mainWindow: BrowserWindow | null = null;
+let workspaceRegistry: WorkspaceRegistry;
+const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 const terminalManager = new TerminalManager({
   data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
@@ -19,13 +26,36 @@ const terminalManager = new TerminalManager({
 });
 
 function registerIpcHandlers(): void {
-  ipcMain.handle(IPC.listWorkspaces, () => WORKSPACES);
+  ipcMain.handle(IPC.listWorkspaces, () => workspaceRegistry.catalog());
 
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
-    const { workspaceId } = startWorkspaceInput.parse(input);
-    const workspace = getWorkspace(workspaceId);
-    const runtime = await createWorkspaceRuntime(app.getPath("userData"), workspace);
-    return terminalManager.startWorkspace(workspace, runtime);
+    const { workspaceId, targetId } = startWorkspaceInput.parse(input);
+    const resolvedTarget = await workspaceRegistry.resolveTarget(
+      workspaceId,
+      targetId,
+    );
+    const sessionId = terminalManager.createSessionId();
+    const runtime = await createWorkspaceRuntime(
+      app.getPath("userData"),
+      sessionId,
+      resolvedTarget,
+    );
+    try {
+      const isolation = await prepareIsolation(
+        app.getAppPath(),
+        runtime,
+        resolvedTarget,
+      );
+      return await terminalManager.startWorkspace(
+        sessionId,
+        resolvedTarget,
+        runtime,
+        isolation,
+      );
+    } catch (error) {
+      await cleanupWorkspaceRuntime(runtime);
+      throw error;
+    }
   });
 
   ipcMain.handle(IPC.terminalWrite, (_event, input: unknown) => {
@@ -38,9 +68,9 @@ function registerIpcHandlers(): void {
     terminalManager.resize(sessionId, terminalId, cols, rows);
   });
 
-  ipcMain.handle(IPC.stopWorkspace, (_event, input: unknown) => {
+  ipcMain.handle(IPC.stopWorkspace, async (_event, input: unknown) => {
     const { sessionId } = stopWorkspaceInput.parse(input);
-    terminalManager.stopSession(sessionId);
+    await terminalManager.stopSession(sessionId);
   });
 }
 
@@ -63,7 +93,7 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("closed", () => {
-    terminalManager.stopAll();
+    void terminalManager.stopAll();
     mainWindow = null;
   });
 
@@ -75,7 +105,17 @@ async function createWindow(): Promise<void> {
   }
 }
 
+if (!hasSingleInstanceLock) {
+  app.quit();
+}
+
 app.whenReady().then(async () => {
+  if (!hasSingleInstanceLock) {
+    return;
+  }
+  await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
+  workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
+  await workspaceRegistry.initialize();
   registerIpcHandlers();
   await createWindow();
 
@@ -84,12 +124,20 @@ app.whenReady().then(async () => {
       await createWindow();
     }
   });
+
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) {
+        mainWindow.restore();
+      }
+      mainWindow.focus();
+    }
+  });
 });
 
-app.on("before-quit", () => terminalManager.stopAll());
+app.on("before-quit", () => void terminalManager.stopAll());
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();
   }
 });
-

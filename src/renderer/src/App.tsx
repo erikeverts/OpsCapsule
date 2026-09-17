@@ -1,9 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import type {
-  WorkspaceDefinition,
+  WorkspaceCatalog,
+  WorkspaceCatalogEntry,
   WorkspaceSession,
+  WorkspaceTargetSummary,
 } from "../../shared/contracts";
 import { TerminalPane } from "./components/TerminalPane";
+
+function sessionKey(workspaceId: string, targetId: string): string {
+  return `${workspaceId}/${targetId}`;
+}
 
 function CapsuleView({
   session,
@@ -41,19 +47,92 @@ function CapsuleView({
   );
 }
 
+function ContextStrip({ target }: { target: WorkspaceTargetSummary }) {
+  return (
+    <section className="context-strip" aria-label="Target context">
+      <div>
+        <span>Cloud</span>
+        <strong>
+          {target.cloud
+            ? `${target.cloud.provider.toUpperCase()} · ${target.cloud.name}`
+            : "None"}
+        </strong>
+      </div>
+      <div>
+        <span>Identity</span>
+        <strong>{target.cloud?.identity ?? "Not configured"}</strong>
+      </div>
+      <div>
+        <span>Kubernetes</span>
+        <strong>{target.kubernetes?.context ?? "Isolated empty config"}</strong>
+      </div>
+      <div>
+        <span>Filesystem</span>
+        <strong>
+          {target.isolationMode === "enforced"
+            ? `${target.directories.length} roots enforced`
+            : "Context only"}
+        </strong>
+      </div>
+    </section>
+  );
+}
+
+function WorkspaceNavigation({
+  workspaces,
+  selectedId,
+  sessions,
+  onSelect,
+}: {
+  workspaces: WorkspaceCatalogEntry[];
+  selectedId: string;
+  sessions: Record<string, WorkspaceSession>;
+  onSelect: (workspace: WorkspaceCatalogEntry) => void;
+}) {
+  return (
+    <nav className="workspace-list" aria-label="Workspaces">
+      {workspaces.map((workspace) => {
+        const running = Object.values(sessions).some(
+          (session) => session.workspace.id === workspace.id,
+        );
+        return (
+          <button
+            className={workspace.id === selectedId ? "selected" : ""}
+            key={workspace.id}
+            onClick={() => onSelect(workspace)}
+            type="button"
+          >
+            <span className={`status-dot ${running ? "running" : ""}`} />
+            <span>
+              <strong>{workspace.name}</strong>
+              <small>
+                {workspace.targets.length} target
+                {workspace.targets.length === 1 ? "" : "s"}
+              </small>
+            </span>
+          </button>
+        );
+      })}
+    </nav>
+  );
+}
+
 export function App() {
-  const [workspaces, setWorkspaces] = useState<WorkspaceDefinition[]>([]);
-  const [selectedId, setSelectedId] = useState<string>("");
+  const [catalog, setCatalog] = useState<WorkspaceCatalog | null>(null);
+  const [selectedWorkspaceId, setSelectedWorkspaceId] = useState("");
+  const [selectedTargetId, setSelectedTargetId] = useState("");
   const [sessions, setSessions] = useState<Record<string, WorkspaceSession>>({});
-  const [startingId, setStartingId] = useState<string | null>(null);
+  const [startingKey, setStartingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     window.opsCapsule
       .listWorkspaces()
-      .then((available) => {
-        setWorkspaces(available);
-        setSelectedId(available[0]?.id ?? "");
+      .then((loadedCatalog) => {
+        setCatalog(loadedCatalog);
+        const workspace = loadedCatalog.workspaces[0];
+        setSelectedWorkspaceId(workspace?.id ?? "");
+        setSelectedTargetId(workspace?.targets[0]?.id ?? "");
       })
       .catch((reason: unknown) =>
         setError(reason instanceof Error ? reason.message : String(reason)),
@@ -61,42 +140,67 @@ export function App() {
   }, []);
 
   const selectedWorkspace = useMemo(
-    () => workspaces.find(({ id }) => id === selectedId),
-    [selectedId, workspaces],
+    () =>
+      catalog?.workspaces.find(({ id }) => id === selectedWorkspaceId),
+    [catalog, selectedWorkspaceId],
   );
-  const selectedSession = sessions[selectedId];
+  const selectedTarget = useMemo(
+    () =>
+      selectedWorkspace?.targets.find(({ id }) => id === selectedTargetId),
+    [selectedTargetId, selectedWorkspace],
+  );
+  const activeKey =
+    selectedWorkspace && selectedTarget
+      ? sessionKey(selectedWorkspace.id, selectedTarget.id)
+      : "";
+  const selectedSession = sessions[activeKey];
 
-  async function startWorkspace(workspaceId: string): Promise<void> {
-    if (sessions[workspaceId] || startingId) {
+  function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
+    setSelectedWorkspaceId(workspace.id);
+    setSelectedTargetId(workspace.targets[0]?.id ?? "");
+    setError(null);
+  }
+
+  async function startWorkspace(
+    workspaceId: string,
+    targetId: string,
+  ): Promise<void> {
+    const key = sessionKey(workspaceId, targetId);
+    if (sessions[key] || startingKey) {
       return;
     }
-    setStartingId(workspaceId);
+    setStartingKey(key);
     setError(null);
     try {
-      const session = await window.opsCapsule.startWorkspace(workspaceId);
-      setSessions((current) => ({ ...current, [workspaceId]: session }));
+      const session = await window.opsCapsule.startWorkspace(
+        workspaceId,
+        targetId,
+      );
+      setSessions((current) => ({ ...current, [key]: session }));
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : String(reason));
     } finally {
-      setStartingId(null);
+      setStartingKey(null);
     }
   }
 
-  async function stopWorkspace(workspaceId: string): Promise<void> {
-    const session = sessions[workspaceId];
+  async function stopWorkspace(key: string): Promise<void> {
+    const session = sessions[key];
     if (!session) {
       return;
     }
     await window.opsCapsule.stopWorkspace(session.id);
     setSessions((current) => {
       const next = { ...current };
-      delete next[workspaceId];
+      delete next[key];
       return next;
     });
   }
 
+  const production = selectedTarget?.risk === "production";
+
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${production ? "production-active" : ""}`}>
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">OC</div>
@@ -106,40 +210,33 @@ export function App() {
           </div>
         </div>
 
-        <p className="section-label">Capsules</p>
-        <nav className="workspace-list" aria-label="Workspaces">
-          {workspaces.map((workspace) => {
-            const running = Boolean(sessions[workspace.id]);
-            return (
-              <button
-                className={workspace.id === selectedId ? "selected" : ""}
-                key={workspace.id}
-                onClick={() => setSelectedId(workspace.id)}
-                type="button"
-              >
-                <span className={`status-dot ${running ? "running" : ""}`} />
-                <span>
-                  <strong>{workspace.name}</strong>
-                  <small>
-                    {workspace.environment} · {workspace.region}
-                  </small>
-                </span>
-              </button>
-            );
-          })}
-        </nav>
+        <p className="section-label">Workspaces</p>
+        <WorkspaceNavigation
+          workspaces={catalog?.workspaces ?? []}
+          selectedId={selectedWorkspaceId}
+          sessions={sessions}
+          onSelect={selectWorkspace}
+        />
 
         <div className="sidebar-note">
           <span className="shield">◇</span>
           <div>
-            <strong>Isolated by default</strong>
-            <span>AWS and Kubernetes context stay inside each capsule.</span>
+            <strong>
+              {selectedTarget?.isolationMode === "enforced"
+                ? "Filesystem enforced"
+                : "Context isolation only"}
+            </strong>
+            <span>
+              {selectedTarget?.isolationMode === "enforced"
+                ? "Configured roots and capsule-private storage are enforced by the OS."
+                : "Filesystem access is not restricted for this target."}
+            </span>
           </div>
         </div>
       </aside>
 
       <div className="workspace-area">
-        {selectedWorkspace ? (
+        {selectedWorkspace && selectedTarget ? (
           <>
             <header className="workspace-header">
               <div>
@@ -147,13 +244,18 @@ export function App() {
                   <span className="live-indicator" />
                   {selectedSession ? "Capsule running" : "Capsule ready"}
                 </div>
-                <h1>{selectedWorkspace.name}</h1>
+                <h1>
+                  {selectedWorkspace.name}
+                  <span className={`risk-badge risk-${selectedTarget.risk}`}>
+                    {selectedTarget.risk}
+                  </span>
+                </h1>
               </div>
               <div className="header-actions">
                 {selectedSession ? (
                   <button
                     className="secondary-button"
-                    onClick={() => void stopWorkspace(selectedWorkspace.id)}
+                    onClick={() => void stopWorkspace(activeKey)}
                     type="button"
                   >
                     Stop capsule
@@ -161,42 +263,56 @@ export function App() {
                 ) : (
                   <button
                     className="primary-button"
-                    disabled={startingId !== null}
-                    onClick={() => void startWorkspace(selectedWorkspace.id)}
+                    disabled={startingKey !== null}
+                    onClick={() =>
+                      void startWorkspace(
+                        selectedWorkspace.id,
+                        selectedTarget.id,
+                      )
+                    }
                     type="button"
                   >
-                    {startingId === selectedWorkspace.id
-                      ? "Starting…"
-                      : "Launch capsule"}
+                    {startingKey === activeKey ? "Starting…" : "Launch capsule"}
                   </button>
                 )}
               </div>
             </header>
 
-            <section className="context-strip" aria-label="Workspace context">
-              <div>
-                <span>Account</span>
-                <strong>{selectedWorkspace.accountId}</strong>
-              </div>
-              <div>
-                <span>AWS profile</span>
-                <strong>{selectedWorkspace.awsProfile}</strong>
-              </div>
-              <div>
-                <span>EKS cluster</span>
-                <strong>{selectedWorkspace.cluster}</strong>
-              </div>
-              <div>
-                <span>Namespace</span>
-                <strong>{selectedWorkspace.namespace}</strong>
-              </div>
-            </section>
+            <nav className="target-tabs" aria-label="Operational targets">
+              {selectedWorkspace.targets.map((target) => {
+                const key = sessionKey(selectedWorkspace.id, target.id);
+                return (
+                  <button
+                    className={target.id === selectedTarget.id ? "selected" : ""}
+                    key={target.id}
+                    onClick={() => {
+                      setSelectedTargetId(target.id);
+                      setError(null);
+                    }}
+                    type="button"
+                  >
+                    <span
+                      className={`target-status ${sessions[key] ? "running" : ""}`}
+                    />
+                    {target.name}
+                  </button>
+                );
+              })}
+            </nav>
+
+            <ContextStrip target={selectedTarget} />
 
             {error ? <div className="error-banner">{error}</div> : null}
+            {catalog && catalog.errors.length > 0 ? (
+              <div className="manifest-warning">
+                {catalog.errors.length} workspace manifest
+                {catalog.errors.length === 1 ? "" : "s"} could not be loaded.
+              </div>
+            ) : null}
 
-            {Object.values(sessions).map((session) => (
+            {Object.entries(sessions).map(([key, session]) => (
               <CapsuleView
-                active={session.workspace.id === selectedId}
+                active={key === activeKey}
                 key={session.id}
                 session={session}
               />
@@ -207,19 +323,29 @@ export function App() {
                 <div className="capsule-orbit">
                   <span>OC</span>
                 </div>
-                <h2>Start an isolated operations workspace</h2>
-                <p>
-                  Three terminals will open with a capsule-specific kubeconfig,
-                  AWS profile, region, cluster, and namespace.
-                </p>
+                <h2>Launch the {selectedTarget.name} target</h2>
+                <p>{selectedWorkspace.description}</p>
+                <div className="permission-preview">
+                  {selectedTarget.directories.map((directory) => (
+                    <div key={directory.id}>
+                      <span>{directory.access === "read-write" ? "RW" : "RO"}</span>
+                      <code>{directory.path}</code>
+                    </div>
+                  ))}
+                </div>
                 <button
                   className="primary-button"
-                  disabled={startingId !== null}
-                  onClick={() => void startWorkspace(selectedWorkspace.id)}
+                  disabled={startingKey !== null}
+                  onClick={() =>
+                    void startWorkspace(
+                      selectedWorkspace.id,
+                      selectedTarget.id,
+                    )
+                  }
                   type="button"
                 >
-                  {startingId === selectedWorkspace.id
-                    ? "Starting capsule…"
+                  {startingKey === activeKey
+                    ? "Preparing sandbox…"
                     : "Launch capsule"}
                 </button>
               </section>
@@ -227,21 +353,29 @@ export function App() {
 
             <footer className="runtime-footer">
               <span>
-                Runtime adapter: <strong>command</strong>
+                Isolation:{" "}
+                <strong>
+                  {selectedSession
+                    ? selectedSession.isolation.backend
+                    : selectedTarget.isolationMode}
+                </strong>
               </span>
               <code>
-                {selectedSession?.runtime.kubeconfig ??
-                  "KUBECONFIG will be created on launch"}
+                {selectedSession?.runtime.temp ?? selectedWorkspace.sourcePath}
               </code>
             </footer>
           </>
         ) : (
           <section className="empty-state">
-            <h2>Loading workspaces…</h2>
+            <h2>
+              {catalog && catalog.errors.length > 0
+                ? "No valid workspace manifests"
+                : "Loading workspaces…"}
+            </h2>
+            {catalog ? <code>{catalog.configDirectory}</code> : null}
           </section>
         )}
       </div>
     </main>
   );
 }
-

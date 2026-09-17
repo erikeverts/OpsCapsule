@@ -22,7 +22,12 @@ describe("IPC contracts", () => {
   });
 
   it("rejects malformed renderer input", () => {
-    expect(() => startWorkspaceInput.parse({ workspaceId: "" })).toThrow();
+    expect(() =>
+      startWorkspaceInput.parse({ workspaceId: "", targetId: "development" }),
+    ).toThrow();
+    expect(() =>
+      startWorkspaceInput.parse({ workspaceId: "atlas", targetId: "" }),
+    ).toThrow();
     expect(() =>
       terminalResizeInput.parse({
         sessionId: "session",
@@ -33,4 +38,3 @@ describe("IPC contracts", () => {
     ).toThrow();
   });
 });
-
