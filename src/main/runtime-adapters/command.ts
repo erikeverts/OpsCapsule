@@ -29,9 +29,8 @@ export class CommandRuntimeAdapter implements RuntimeAdapter {
     return {
       command,
       args: [...this.definition.args],
-      cwd: context.runtime.root,
+      cwd: context.cwd,
       env: { ...context.environment },
     };
   }
 }
-

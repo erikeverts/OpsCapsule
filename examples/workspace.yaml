@@ -1,0 +1,105 @@
+apiVersion: opscapsule.dev/v1alpha1
+kind: Workspace
+
+metadata:
+  id: example
+  name: Example workspace
+  description: Example with separate non-production and production targets.
+
+cloudConnections:
+  - id: aws-nonprod
+    name: AWS non-production
+    provider: aws
+    config:
+      authentication:
+        type: profile
+        profile: example-nonprod
+      expectedIdentity:
+        accountId: "111122223333"
+      defaults:
+        region: eu-west-1
+
+  - id: aws-production
+    name: AWS production
+    provider: aws
+    config:
+      authentication:
+        type: profile
+        profile: example-production
+      expectedIdentity:
+        accountId: "999900001111"
+      defaults:
+        region: eu-west-1
+
+kubernetesContexts:
+  - id: development
+    name: Development cluster
+    namespace: application-dev
+    source:
+      type: kubeconfig
+      path: ~/.kube/config
+      context: example-development
+
+  - id: production
+    name: Production cluster
+    namespace: application
+    source:
+      type: kubeconfig
+      path: ~/.kube/config
+      context: example-production
+
+directories:
+  - id: application
+    name: Application repository
+    path: /path/to/application
+    access: read-write
+
+  - id: documentation
+    name: Documentation
+    path: /path/to/documentation
+    access: read-only
+
+targets:
+  - id: development
+    name: Development
+    environment: development
+    risk: development
+    cloudConnection: aws-nonprod
+    kubernetesContext: development
+    directories:
+      - application
+      - documentation
+    defaultDirectory: application
+    agentRuntime:
+      adapter: command
+      command: $SHELL
+      args: []
+    isolation:
+      mode: enforced
+      network:
+        mode: public
+        allowedDomains: []
+
+  - id: production
+    name: Production
+    environment: production
+    risk: production
+    cloudConnection: aws-production
+    kubernetesContext: production
+    directories:
+      - application
+      - documentation
+    defaultDirectory: application
+    agentRuntime:
+      adapter: command
+      command: $SHELL
+      args: []
+    isolation:
+      mode: enforced
+      network:
+        mode: allowlist
+        allowedDomains:
+          - "*.amazonaws.com"
+          - "api.github.com"
+          - "github.com"
+

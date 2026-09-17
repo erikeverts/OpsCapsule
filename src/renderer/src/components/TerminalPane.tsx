@@ -77,11 +77,11 @@ export function TerminalPane({
         xterm.writeln(`\r\n[process exited with code ${event.exitCode}]`);
       }
     });
+    void window.opsCapsule.attachTerminal(sessionId, terminal.id);
 
     requestAnimationFrame(() => {
       fit();
       xterm.focus();
-      void window.opsCapsule.writeTerminal(sessionId, terminal.id, "\r");
     });
 
     return () => {
@@ -102,4 +102,3 @@ export function TerminalPane({
 
   return <div className="terminal-surface" ref={containerRef} />;
 }
-

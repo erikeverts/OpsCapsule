@@ -1,6 +1,6 @@
 {
   "name": "opscapsule",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "private": true,
   "description": "An isolated workspace for operations tooling and agent runtimes.",
   "type": "module",
@@ -10,7 +10,7 @@
     "dev:renderer": "vite --config vite.config.ts",
     "dev:electron": "wait-on tcp:5173 && cross-env OPSCAPSULE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "npm run typecheck && npm run build:main && npm run build:renderer",
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/preload.cjs --external:electron",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/main/isolation/sandbox-runner.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sandbox-runner.mjs --external:@anthropic-ai/sandbox-runtime --external:@anthropic-ai/sandbox-runtime/* && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/preload.cjs --external:electron",
     "build:renderer": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -18,11 +18,13 @@
     "postinstall": "electron-rebuild -f -w node-pty"
   },
   "dependencies": {
+    "@anthropic-ai/sandbox-runtime": "0.0.76",
     "@xterm/addon-fit": "0.11.0",
     "@xterm/xterm": "6.0.0",
     "node-pty": "1.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
+    "yaml": "2.9.1",
     "zod": "4.6.5"
   },
   "devDependencies": {
