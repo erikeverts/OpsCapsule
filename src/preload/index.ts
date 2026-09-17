@@ -1,0 +1,39 @@
+import { contextBridge, ipcRenderer } from "electron";
+import type {
+  OpsCapsuleApi,
+  TerminalDataEvent,
+  TerminalExitEvent,
+} from "../shared/contracts.js";
+import { IPC } from "../shared/ipc.js";
+
+const api: OpsCapsuleApi = {
+  listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces),
+  startWorkspace: (workspaceId) =>
+    ipcRenderer.invoke(IPC.startWorkspace, { workspaceId }),
+  writeTerminal: (sessionId, terminalId, data) =>
+    ipcRenderer.invoke(IPC.terminalWrite, { sessionId, terminalId, data }),
+  resizeTerminal: (sessionId, terminalId, cols, rows) =>
+    ipcRenderer.invoke(IPC.terminalResize, {
+      sessionId,
+      terminalId,
+      cols,
+      rows,
+    }),
+  stopWorkspace: (sessionId) =>
+    ipcRenderer.invoke(IPC.stopWorkspace, { sessionId }),
+  onTerminalData: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: TerminalDataEvent) =>
+      listener(data);
+    ipcRenderer.on(IPC.terminalData, handler);
+    return () => ipcRenderer.removeListener(IPC.terminalData, handler);
+  },
+  onTerminalExit: (listener) => {
+    const handler = (_event: Electron.IpcRendererEvent, data: TerminalExitEvent) =>
+      listener(data);
+    ipcRenderer.on(IPC.terminalExit, handler);
+    return () => ipcRenderer.removeListener(IPC.terminalExit, handler);
+  },
+};
+
+contextBridge.exposeInMainWorld("opsCapsule", Object.freeze(api));
+
