@@ -30,6 +30,7 @@ export interface SandboxRuntimeSettings {
   enableWeakerNestedSandbox: boolean;
   enableWeakerNetworkIsolation: boolean;
   allowAppleEvents: boolean;
+  allowPty: boolean;
 }
 
 const executeFile = promisify(execFile);
@@ -72,6 +73,9 @@ export function buildSandboxRuntimeSettings(options: {
     enableWeakerNestedSandbox: false,
     enableWeakerNetworkIsolation: false,
     allowAppleEvents: false,
+    // Every OpsCapsule process is attached to a node-pty terminal. On macOS,
+    // zsh needs Sandbox Runtime's pseudo-tty allowance for job control.
+    allowPty: true,
   };
 }
 

@@ -95,6 +95,7 @@ describe("sandbox policy", () => {
     );
     expect(settings.network.allowAllUnixSockets).toBe(false);
     expect(settings.allowAppleEvents).toBe(false);
+    expect(settings.allowPty).toBe(true);
   });
 
   it.each([
