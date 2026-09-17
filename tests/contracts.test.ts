@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   startWorkspaceInput,
+  terminalAttachmentInput,
   terminalResizeInput,
 } from "../src/shared/contracts.js";
 
@@ -19,6 +20,15 @@ describe("IPC contracts", () => {
       cols: 120,
       rows: 40,
     });
+  });
+
+  it("accepts a terminal attachment identity", () => {
+    expect(
+      terminalAttachmentInput.parse({
+        sessionId: "session",
+        terminalId: "terminal",
+      }),
+    ).toEqual({ sessionId: "session", terminalId: "terminal" });
   });
 
   it("rejects malformed renderer input", () => {

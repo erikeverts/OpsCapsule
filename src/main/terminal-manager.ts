@@ -20,6 +20,8 @@ import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 interface TerminalRecord {
   sessionId: string;
   process: pty.IPty;
+  attached: boolean;
+  pendingData: string;
 }
 
 interface SessionRecord {
@@ -104,6 +106,23 @@ export class TerminalManager {
     this.getTerminal(sessionId, terminalId).process.write(data);
   }
 
+  attach(sessionId: string, terminalId: string): void {
+    const terminal = this.getTerminal(sessionId, terminalId);
+    if (terminal.attached) {
+      return;
+    }
+
+    terminal.attached = true;
+    if (terminal.pendingData) {
+      this.events.data({
+        sessionId,
+        terminalId,
+        data: terminal.pendingData,
+      });
+      terminal.pendingData = "";
+    }
+  }
+
   resize(
     sessionId: string,
     terminalId: string,
@@ -146,11 +165,21 @@ export class TerminalManager {
       env: launchSpec.env,
     });
 
-    this.terminals.set(terminalId, { sessionId, process });
+    const terminalRecord: TerminalRecord = {
+      sessionId,
+      process,
+      attached: false,
+      pendingData: "",
+    };
+    this.terminals.set(terminalId, terminalRecord);
     this.sessions.get(sessionId)?.terminalIds.add(terminalId);
 
     process.onData((data) => {
-      this.events.data({ sessionId, terminalId, data });
+      if (terminalRecord.attached) {
+        this.events.data({ sessionId, terminalId, data });
+      } else {
+        terminalRecord.pendingData += data;
+      }
     });
     process.onExit(({ exitCode }) => {
       this.events.exit({ sessionId, terminalId, exitCode });
@@ -167,4 +196,3 @@ export class TerminalManager {
     return terminal;
   }
 }
-

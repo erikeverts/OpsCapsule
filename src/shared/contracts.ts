@@ -120,6 +120,11 @@ export const terminalWriteInput = z.object({
   data: z.string(),
 });
 
+export const terminalAttachmentInput = z.object({
+  sessionId: z.string().min(1),
+  terminalId: z.string().min(1),
+});
+
 export const terminalResizeInput = z.object({
   sessionId: z.string().min(1),
   terminalId: z.string().min(1),
@@ -137,6 +142,7 @@ export interface OpsCapsuleApi {
     workspaceId: string,
     targetId: string,
   ): Promise<WorkspaceSession>;
+  attachTerminal(sessionId: string, terminalId: string): Promise<void>;
   writeTerminal(sessionId: string, terminalId: string, data: string): Promise<void>;
   resizeTerminal(
     sessionId: string,

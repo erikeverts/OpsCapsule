@@ -10,6 +10,8 @@ const api: OpsCapsuleApi = {
   listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces),
   startWorkspace: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.startWorkspace, { workspaceId, targetId }),
+  attachTerminal: (sessionId, terminalId) =>
+    ipcRenderer.invoke(IPC.terminalAttach, { sessionId, terminalId }),
   writeTerminal: (sessionId, terminalId, data) =>
     ipcRenderer.invoke(IPC.terminalWrite, { sessionId, terminalId, data }),
   resizeTerminal: (sessionId, terminalId, cols, rows) =>

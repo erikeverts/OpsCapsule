@@ -3,6 +3,7 @@ import { app, BrowserWindow, ipcMain } from "electron";
 import {
   startWorkspaceInput,
   stopWorkspaceInput,
+  terminalAttachmentInput,
   terminalResizeInput,
   terminalWriteInput,
 } from "../shared/contracts.js";
@@ -61,6 +62,11 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.terminalWrite, (_event, input: unknown) => {
     const { sessionId, terminalId, data } = terminalWriteInput.parse(input);
     terminalManager.write(sessionId, terminalId, data);
+  });
+
+  ipcMain.handle(IPC.terminalAttach, (_event, input: unknown) => {
+    const { sessionId, terminalId } = terminalAttachmentInput.parse(input);
+    terminalManager.attach(sessionId, terminalId);
   });
 
   ipcMain.handle(IPC.terminalResize, (_event, input: unknown) => {
