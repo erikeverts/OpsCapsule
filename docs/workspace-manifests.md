@@ -4,6 +4,15 @@ OpsCapsule discovers `*.yaml` and `*.yml` files in its application-data
 `config/workspaces` directory. The UI shows the exact directory and source file.
 Two fictional examples are created only when that directory contains no manifests.
 
+Workspace Studio can create and edit these files from the application. The forms
+and the YAML preview operate on the same public manifest model; there is no hidden
+database representation. OpsCapsule validates the full manifest before saving,
+writes replacements atomically, and rejects a save if another process changed the
+file after it was opened.
+
+The editor stores references to AWS profiles and kubeconfig files, never access
+keys, tokens, or other credentials.
+
 The public manifest format is versioned independently of internal TypeScript
 types:
 
@@ -81,4 +90,3 @@ credential brokering is not implemented yet, so a configured AWS profile or agen
 CLI that depends on files in the real home directory may require a future broker or
 an explicitly designed read grant. OpsCapsule does not expose the entire real home
 directory merely to make authentication work.
-

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
 export type DirectoryAccess = "read-only" | "read-write";
@@ -66,6 +67,13 @@ export interface WorkspaceCatalog {
   errors: WorkspaceLoadError[];
 }
 
+export interface WorkspaceDocument {
+  manifest: WorkspaceManifest;
+  sourcePath: string;
+  revision: string;
+  yaml: string;
+}
+
 export interface RuntimePaths {
   root: string;
   home: string;
@@ -114,6 +122,24 @@ export const startWorkspaceInput = z.object({
   targetId: z.string().min(1),
 });
 
+export const workspaceDocumentInput = z.object({
+  workspaceId: z.string().min(1),
+});
+
+export const createWorkspaceInput = z.object({
+  manifest: z.unknown(),
+});
+
+export const saveWorkspaceInput = z.object({
+  workspaceId: z.string().min(1),
+  revision: z.string().min(1),
+  manifest: z.unknown(),
+});
+
+export const choosePathInput = z.object({
+  kind: z.enum(["directory", "file"]),
+});
+
 export const terminalWriteInput = z.object({
   sessionId: z.string().min(1),
   terminalId: z.string().min(1),
@@ -138,6 +164,14 @@ export const stopWorkspaceInput = z.object({
 
 export interface OpsCapsuleApi {
   listWorkspaces(): Promise<WorkspaceCatalog>;
+  getWorkspace(workspaceId: string): Promise<WorkspaceDocument>;
+  createWorkspace(manifest: WorkspaceManifest): Promise<WorkspaceDocument>;
+  saveWorkspace(
+    workspaceId: string,
+    revision: string,
+    manifest: WorkspaceManifest,
+  ): Promise<WorkspaceDocument>;
+  choosePath(kind: "directory" | "file"): Promise<string | null>;
   startWorkspace(
     workspaceId: string,
     targetId: string,

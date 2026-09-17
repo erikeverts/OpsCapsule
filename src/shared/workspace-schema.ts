@@ -103,3 +103,65 @@ export type CloudConnection = z.infer<typeof cloudConnectionSchema>;
 export type KubernetesContext = z.infer<typeof kubernetesContextSchema>;
 export type WorkspaceDirectory = z.infer<typeof directorySchema>;
 export type WorkspaceTarget = z.infer<typeof targetSchema>;
+
+function assertUniqueIds(
+  values: Array<{ id: string }>,
+  collectionName: string,
+): void {
+  const seen = new Set<string>();
+  for (const value of values) {
+    if (seen.has(value.id)) {
+      throw new Error(`Duplicate ${collectionName} id '${value.id}'`);
+    }
+    seen.add(value.id);
+  }
+}
+
+export function validateWorkspaceReferences(
+  manifest: WorkspaceManifest,
+): void {
+  assertUniqueIds(manifest.cloudConnections, "cloud connection");
+  assertUniqueIds(manifest.kubernetesContexts, "Kubernetes context");
+  assertUniqueIds(manifest.directories, "directory");
+  assertUniqueIds(manifest.targets, "target");
+
+  const cloudIds = new Set(manifest.cloudConnections.map(({ id }) => id));
+  const kubernetesIds = new Set(
+    manifest.kubernetesContexts.map(({ id }) => id),
+  );
+  const directoryIds = new Set(manifest.directories.map(({ id }) => id));
+
+  for (const target of manifest.targets) {
+    if (target.cloudConnection && !cloudIds.has(target.cloudConnection)) {
+      throw new Error(
+        `Target '${target.id}' references unknown cloud connection '${target.cloudConnection}'`,
+      );
+    }
+    if (
+      target.kubernetesContext &&
+      !kubernetesIds.has(target.kubernetesContext)
+    ) {
+      throw new Error(
+        `Target '${target.id}' references unknown Kubernetes context '${target.kubernetesContext}'`,
+      );
+    }
+    for (const directoryId of target.directories) {
+      if (!directoryIds.has(directoryId)) {
+        throw new Error(
+          `Target '${target.id}' references unknown directory '${directoryId}'`,
+        );
+      }
+    }
+    if (!target.directories.includes(target.defaultDirectory)) {
+      throw new Error(
+        `Target '${target.id}' default directory must also appear in its directories list`,
+      );
+    }
+  }
+}
+
+export function parseWorkspaceManifest(input: unknown): WorkspaceManifest {
+  const manifest = workspaceManifestSchema.parse(input);
+  validateWorkspaceReferences(manifest);
+  return manifest;
+}

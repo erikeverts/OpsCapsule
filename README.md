@@ -7,10 +7,16 @@ project contexts side by side without sharing mutable AWS or Kubernetes state. I
 is designed to be agent-agnostic and LLM-agnostic: an agent is a runtime launched
 inside a capsule, not a framework embedded into the application.
 
-## Iteration 2
+## Iteration 3
 
 The current iteration provides:
 
+- a Workspace Studio for creating and editing manifests without hand-writing
+  YAML;
+- form-based management of directories, AWS connections, Kubernetes contexts,
+  targets, agent commands, and isolation policies;
+- live validation and a generated YAML preview;
+- revision-aware, atomic manifest saves that refuse to overwrite external edits;
 - versioned YAML workspace manifests;
 - multiple cloud connections, Kubernetes contexts, directories, and named targets
   per workspace;
@@ -55,5 +61,6 @@ npm run build
 
 See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0001](docs/adr/0001-electron-typescript-spike.md), and
-[ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md) for configuration,
-decisions, and open questions.
+[ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md), and
+[ADR 0003](docs/adr/0003-workspace-studio.md) for configuration, decisions, and
+open questions.

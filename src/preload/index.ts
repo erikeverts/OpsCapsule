@@ -8,6 +8,17 @@ import { IPC } from "../shared/ipc.js";
 
 const api: OpsCapsuleApi = {
   listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces),
+  getWorkspace: (workspaceId) =>
+    ipcRenderer.invoke(IPC.getWorkspace, { workspaceId }),
+  createWorkspace: (manifest) =>
+    ipcRenderer.invoke(IPC.createWorkspace, { manifest }),
+  saveWorkspace: (workspaceId, revision, manifest) =>
+    ipcRenderer.invoke(IPC.saveWorkspace, {
+      workspaceId,
+      revision,
+      manifest,
+    }),
+  choosePath: (kind) => ipcRenderer.invoke(IPC.choosePath, { kind }),
   startWorkspace: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.startWorkspace, { workspaceId, targetId }),
   attachTerminal: (sessionId, terminalId) =>
