@@ -69,5 +69,7 @@ See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0001](docs/adr/0001-electron-typescript-spike.md),
 [ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md),
 [ADR 0003](docs/adr/0003-workspace-studio.md), and
-[ADR 0004](docs/adr/0004-managed-workspace-resources.md) for configuration,
-decisions, and open questions.
+[ADR 0004](docs/adr/0004-managed-workspace-resources.md) for current
+configuration and decisions. The proposed Iteration 4 contract is described in
+[agent profiles](docs/agent-profiles.md) and
+[ADR 0005](docs/adr/0005-managed-agent-profiles.md).

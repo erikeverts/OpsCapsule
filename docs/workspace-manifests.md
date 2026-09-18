@@ -28,6 +28,10 @@ kind: Workspace
 ```
 
 See [`examples/workspace.yaml`](../examples/workspace.yaml) for a complete example.
+The Iteration 4 agent-profile extension is currently a proposal; see
+[`agent-profiles.md`](agent-profiles.md) and
+[`ADR 0005`](adr/0005-managed-agent-profiles.md) for its exact contract and
+migration plan.
 
 ## Model
 
@@ -40,6 +44,10 @@ See [`examples/workspace.yaml`](../examples/workspace.yaml) for a complete examp
 - A target selects at most one cloud identity, at most one Kubernetes context,
   one or more directories, and one agent runtime.
 - A capsule is one running instance of one target.
+
+The proposed agent-profile model moves reusable agent configuration to the
+workspace and lets a target override the workspace default. Until that model is
+implemented, `target.agentRuntime` remains the active manifest field.
 
 Multiple targets from the same workspace can run concurrently. They do not share
 process environments, kubeconfigs, synthetic home directories, or temporary
