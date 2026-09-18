@@ -6,6 +6,12 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { ContextOnlyIsolation } from "../src/main/isolation/context-only.js";
+import {
+  describePreparedIsolation,
+  restorePreparedIsolation,
+  wrapLaunchSpec,
+} from "../src/main/isolation/launcher.js";
 import {
   buildSandboxRuntimeSettings,
   SandboxRuntimeIsolationBackend,
@@ -111,6 +117,60 @@ describe("sandbox policy", () => {
     ["fd00:ec2::254", false],
   ])("applies public-network safety checks to %s", (host, expected) => {
     expect(allowsPublicDestination({ host, port: 443 })).toBe(expected);
+  });
+});
+
+describe("isolation launcher", () => {
+  const launchSpec = {
+    command: "/bin/zsh",
+    args: ["-l"],
+    cwd: "/projects/app",
+    env: { HOME: "/capsule/home", WSL_INTEROP: "/run/WSL/1_interop" },
+  };
+
+  it("leaves context-only launches untouched", () => {
+    const isolation = new ContextOnlyIsolation([], ["/projects/app"], "public");
+
+    expect(isolation.launcher).toBeNull();
+    expect(isolation.wrap(launchSpec)).toBe(launchSpec);
+    expect(restorePreparedIsolation(describePreparedIsolation(isolation)).wrap(launchSpec)).toEqual(
+      launchSpec,
+    );
+  });
+
+  it("prefixes enforced launches and drops WSL interop from the sandbox", () => {
+    const launcher = {
+      command: "/usr/bin/node",
+      args: ["/app/dist/sandbox-runner.mjs", "--settings", "/capsule/sandbox.json", "--"],
+    };
+
+    const wrapped = wrapLaunchSpec(launcher, launchSpec);
+
+    expect(wrapped.command).toBe("/usr/bin/node");
+    expect(wrapped.args).toEqual([...launcher.args, "/bin/zsh", "-l"]);
+    expect(wrapped.cwd).toBe("/projects/app");
+    expect(wrapped.env).toEqual({ HOME: "/capsule/home" });
+    expect(launchSpec.env.WSL_INTEROP).toBe("/run/WSL/1_interop");
+  });
+
+  it("round-trips a prepared isolation through its descriptor", () => {
+    const descriptor = {
+      effective: {
+        mode: "enforced" as const,
+        backend: "sandbox-runtime" as const,
+        readOnlyPaths: [],
+        readWritePaths: ["/projects/app"],
+        networkMode: "deny" as const,
+      },
+      launcher: { command: "/usr/bin/node", args: ["runner", "--"] },
+    };
+
+    const restored = restorePreparedIsolation(
+      JSON.parse(JSON.stringify(descriptor)) as typeof descriptor,
+    );
+
+    expect(restored.effective).toEqual(descriptor.effective);
+    expect(restored.wrap(launchSpec).args).toEqual(["runner", "--", "/bin/zsh", "-l"]);
   });
 });
 

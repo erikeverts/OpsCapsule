@@ -1,8 +1,14 @@
 import type { EffectiveIsolation, RuntimePaths } from "../../shared/contracts.js";
 import type { ProcessLaunchSpec } from "../runtime-adapters/types.js";
 
+export interface IsolationLauncher {
+  command: string;
+  args: string[];
+}
+
 export interface PreparedIsolation {
   readonly effective: EffectiveIsolation;
+  readonly launcher: IsolationLauncher | null;
   wrap(launchSpec: ProcessLaunchSpec): ProcessLaunchSpec;
 }
 

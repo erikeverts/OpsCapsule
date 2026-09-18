@@ -426,6 +426,7 @@ export function App() {
                     ? selectedSession.isolation.backend
                     : selectedTarget.isolationMode}
                 </strong>
+                {selectedSession ? ` on ${selectedSession.host.label}` : null}
               </span>
               <code>
                 {selectedSession?.runtime.temp ?? selectedWorkspace.sourcePath}

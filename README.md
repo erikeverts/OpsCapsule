@@ -49,8 +49,24 @@ Enforced isolation additionally requires:
 - macOS: `rg` (ripgrep); or
 - Linux: `bwrap`, `socat`, and `rg`.
 
-Windows can parse the same manifests but currently requires explicit
-`context-only` mode while its isolation backend is evaluated.
+### Windows
+
+On Windows the Electron application runs natively while every capsule process
+runs inside a WSL 2 distribution. Runtime files (synthetic homes, kubeconfigs,
+sandbox policies) live in the distribution under `~/.local/state/opscapsule`,
+and enforced isolation uses the Linux Bubblewrap backend inside WSL.
+
+Requirements inside the distribution:
+
+- Node.js on the login-shell `PATH` (for example `apt install nodejs`, or a
+  version manager configured in `~/.profile`, `~/.zprofile`, or `~/.bashrc`);
+- for enforced isolation: `bwrap`, `socat`, and `rg`.
+
+The default distribution is used unless `OPSCAPSULE_WSL_DISTRO` names another.
+Workspace manifests stay in the Windows application-data directory, but the
+paths inside them are Linux paths as seen from the distribution (for example
+`~/projects/app` or `/mnt/c/Users/Ada/projects/app`). See
+[ADR 0006](docs/adr/0006-windows-wsl-execution-host.md) for details and limits.
 
 ```sh
 npm install
@@ -68,6 +84,7 @@ npm run build
 See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0001](docs/adr/0001-electron-typescript-spike.md),
 [ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md),
-[ADR 0003](docs/adr/0003-workspace-studio.md), and
-[ADR 0004](docs/adr/0004-managed-workspace-resources.md) for configuration,
+[ADR 0003](docs/adr/0003-workspace-studio.md),
+[ADR 0004](docs/adr/0004-managed-workspace-resources.md), and
+[ADR 0006](docs/adr/0006-windows-wsl-execution-host.md) for configuration,
 decisions, and open questions.

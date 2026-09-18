@@ -6,6 +6,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -262,6 +263,33 @@ export async function cleanupWorkspaceRuntime(runtime: RuntimePaths): Promise<vo
     rm(runtime.root, { recursive: true, force: true }),
     rm(runtime.temp, { recursive: true, force: true }),
   ]);
+}
+
+export interface CapsuleRuntime {
+  runtime: RuntimePaths;
+  environment: Record<string, string>;
+  workingDirectory: string;
+}
+
+export async function createCapsuleRuntime(
+  baseDirectory: string,
+  sessionId: string,
+  resolvedTarget: ResolvedWorkspaceTarget,
+  inheritedEnvironment: NodeJS.ProcessEnv = process.env,
+): Promise<CapsuleRuntime> {
+  const workingDirectory = await realpath(resolvedTarget.defaultDirectory.path);
+  const runtime = await createWorkspaceRuntime(
+    baseDirectory,
+    sessionId,
+    resolvedTarget,
+  );
+  const environment = buildWorkspaceEnvironment(
+    runtime,
+    resolvedTarget,
+    new CloudAdapterRegistry(),
+    inheritedEnvironment,
+  );
+  return { runtime, environment, workingDirectory };
 }
 
 export async function cleanupStaleWorkspaceRuntimes(
