@@ -100,6 +100,54 @@ from the target's isolated AWS connection and target-specific AWS state. Another
 profile could launch the same agent with a different provider without changing
 the target model.
 
+### Future workspace context and tools
+
+Agent profiles describe **how an agent runs**. They must not become the container
+for everything an agent knows about a workspace. A future workspace context model
+will describe **what the agent should know**, independently of the selected agent
+or model provider. This separation lets a user switch between OpenCode, Claude
+Code, or another CLI without duplicating customer knowledge in every profile.
+
+The context model is expected to support these distinct resource types:
+
+- non-secret workspace metadata as typed or string key/value pairs, such as
+  service names, owners, criticality, ticket queues, or repository identifiers;
+- reference documents such as statements of work, runbooks, work instructions,
+  architecture documents, and service inventories;
+- workspace instructions that an adapter can materialize into an agent-native
+  file such as `AGENTS.md`, `CLAUDE.md`, or another tool-specific equivalent; and
+- explicitly enabled tools, including future MCP server declarations.
+
+The exact manifest fields are deferred, but the trust boundaries are not. Context
+documents and instruction files must be explicit, inspectable resources. A local
+document can be imported as a managed snapshot or reference a file already covered
+by a declared workspace directory; a future connector-backed document must retain
+its source, synchronization status, and last-updated information. Declaring a
+document does not require injecting its complete contents into every prompt. An
+adapter can expose a small catalog and let the agent read relevant documents on
+demand, avoiding unnecessary context-window use.
+
+Workspace context is read-only to the running agent by default and cannot expand
+the target's filesystem or network policy. Metadata and documents may contain
+sensitive customer information, so they receive the same private storage and
+explicit export rules as other managed workspace resources. Metadata values are
+not a secret store.
+
+MCP configuration needs stronger treatment than copying an agent's raw settings.
+An MCP server can execute a local command, contact a remote service, request
+credentials, and expose powerful tools to the agent. A future normalized MCP
+resource must therefore show the command or endpoint and capabilities, run local
+servers inside the target sandbox, obey the target network policy, and obtain
+credentials through a future broker. Workspace or target policy can then select
+which declared servers a profile may use, while an adapter materializes only
+those selections into its native configuration format.
+
+Agent-native configuration imported in the first slice may already contain hooks
+or MCP declarations. It remains constrained by the process sandbox and network
+policy, and the import flow must surface those entries for review. The normalized
+workspace tool model is the future portable and policy-aware replacement; it is
+not part of the initial agent-profile schema.
+
 ### Mutable agent state
 
 Mutable agent data is isolated per workspace, target, and profile:
@@ -156,5 +204,6 @@ legacy field after all supported workspaces have a deterministic migration path.
   needed at the boundary.
 - Importing configuration is a security-sensitive operation and needs inspection,
   warnings, and tests for path containment.
-- Provider secret brokering, shared memory, plugin synchronization, and additional
-  agent adapters remain separate increments.
+- Workspace metadata, reference documents, portable instructions, normalized MCP
+  resources, provider secret brokering, shared memory, plugin synchronization,
+  and additional agent adapters remain separate increments.

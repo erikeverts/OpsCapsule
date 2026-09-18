@@ -210,11 +210,14 @@ state root. No mutable state path is configurable as an arbitrary host path.
 This proposal does not define:
 
 - secret values or a credential broker;
-- workspace instructions or curated memory;
+- workspace metadata, reference documents, instructions, or curated memory;
+- normalized MCP server resources or tool permissions;
 - shared history across targets;
 - agent plugin installation or synchronization;
 - multiple simultaneous agent panes; or
 - remote agent execution.
 
-Those features can build on the same profile id and managed-resource layout
-without expanding the first implementation's trust boundary.
+Those features can build on the same managed-resource and adapter boundaries
+without expanding the first implementation's trust boundary. They remain
+workspace context or tool resources rather than becoming agent-profile fields;
+ADR 0005 records the intended separation.
