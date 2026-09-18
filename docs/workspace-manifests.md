@@ -69,6 +69,12 @@ directory and is not shared with another target.
 Absolute paths and paths beginning with `~/` are supported. Relative directory,
 kubeconfig, and provider-config paths are resolved relative to `workspace.yaml`.
 
+Paths are interpreted on the execution host, which is the local machine on macOS
+and Linux and the WSL distribution on Windows. On Windows, use Linux paths such as
+`~/projects/app` or `/mnt/c/Users/Ada/projects/app`; `~` is the WSL home, and
+manifest-relative paths resolve against the manifest directory as mounted inside
+WSL.
+
 Every configured directory must exist before its target can launch. OpsCapsule
 resolves symbolic links to canonical paths before building the sandbox policy.
 

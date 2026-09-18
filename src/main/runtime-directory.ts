@@ -381,6 +381,43 @@ export async function cleanupWorkspaceRuntime(runtime: RuntimePaths): Promise<vo
   ]);
 }
 
+export interface CapsuleRuntime {
+  runtime: RuntimePaths;
+  environment: Record<string, string>;
+  workingDirectory: string;
+}
+
+export async function createCapsuleRuntime(
+  baseDirectory: string,
+  sessionId: string,
+  resolvedTarget: ResolvedWorkspaceTarget,
+  inheritedEnvironment: NodeJS.ProcessEnv = process.env,
+): Promise<CapsuleRuntime> {
+  const workingDirectory = await realpath(resolvedTarget.defaultDirectory.path);
+  const runtime = await createWorkspaceRuntime(
+    baseDirectory,
+    sessionId,
+    resolvedTarget,
+  );
+  const environment = buildWorkspaceEnvironment(
+    runtime,
+    resolvedTarget,
+    new CloudAdapterRegistry(),
+    inheritedEnvironment,
+  );
+  return { runtime, environment, workingDirectory };
+}
+
+export async function deleteWorkspaceState(
+  baseDirectory: string,
+  workspaceId: string,
+): Promise<void> {
+  await rm(join(baseDirectory, "state", "workspaces", workspaceId), {
+    recursive: true,
+    force: true,
+  });
+}
+
 export async function cleanupStaleWorkspaceRuntimes(
   baseDirectory: string,
 ): Promise<void> {

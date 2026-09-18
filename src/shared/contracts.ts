@@ -180,12 +180,18 @@ export interface TerminalDescriptor {
   kind: PaneKind;
 }
 
+export interface ExecutionHostSummary {
+  id: "local" | "wsl";
+  label: string;
+}
+
 export interface WorkspaceSession {
   id: string;
   workspace: Pick<WorkspaceCatalogEntry, "id" | "name">;
   target: WorkspaceTargetSummary;
   runtime: RuntimePaths;
   isolation: EffectiveIsolation;
+  host: ExecutionHostSummary;
   terminals: TerminalDescriptor[];
 }
 

@@ -1,4 +1,5 @@
 import { execFile } from "node:child_process";
+import { createInterface } from "node:readline";
 import { promisify } from "node:util";
 import * as pty from "node-pty";
 import {
@@ -8,16 +9,61 @@ import {
   wrapSandboxedLaunch,
 } from "./isolation/sandbox-command.js";
 import type { PreparedIsolation } from "./isolation/types.js";
-import type {
-  TerminalWorkerRequest,
-  TerminalWorkerResponse,
+import { prepareAgentLaunch } from "./runtime-adapters/readiness.js";
+import {
+  encodeStdioMessage,
+  stdioTransportFlag,
+  type TerminalWorkerRequest,
+  type TerminalWorkerResponse,
 } from "./terminal-worker-protocol.js";
 
-const parentPort = process.parentPort;
-if (!parentPort) {
-  throw new Error("Terminal worker must be launched as an Electron utility process");
+interface WorkerTransport {
+  post(message: TerminalWorkerResponse): void;
+  onRequest(listener: (request: TerminalWorkerRequest) => void): void;
+  onDisconnect(listener: () => void): void;
 }
 
+// Inside Electron the worker is a utility process and talks to the main
+// process over its MessagePort. Inside WSL it is a plain Node.js process
+// started by wsl.exe and talks over stdio, one JSON message per line.
+function createTransport(): WorkerTransport {
+  const parentPort = process.parentPort;
+  if (parentPort) {
+    return {
+      post: (message) => parentPort.postMessage(message),
+      onRequest: (listener) => {
+        parentPort.on("message", (event) => {
+          listener(event.data as TerminalWorkerRequest);
+        });
+      },
+      onDisconnect: () => undefined,
+    };
+  }
+  if (!process.argv.includes(stdioTransportFlag)) {
+    throw new Error(
+      `Terminal worker must be launched as an Electron utility process or with ${stdioTransportFlag}`,
+    );
+  }
+  const lines = createInterface({ input: process.stdin, crlfDelay: Infinity });
+  return {
+    post: (message) => {
+      process.stdout.write(encodeStdioMessage(message));
+    },
+    onRequest: (listener) => {
+      lines.on("line", (line) => {
+        if (!line.trim()) {
+          return;
+        }
+        listener(JSON.parse(line) as TerminalWorkerRequest);
+      });
+    },
+    onDisconnect: (listener) => {
+      lines.on("close", listener);
+    },
+  };
+}
+
+const transport = createTransport();
 const terminals = new Map<string, pty.IPty>();
 const executeFile = promisify(execFile);
 let isolation: PreparedIsolation["execution"] | undefined;
@@ -25,7 +71,7 @@ let shuttingDown = false;
 let emptyWaiter: (() => void) | undefined;
 
 function post(message: TerminalWorkerResponse): void {
-  parentPort.postMessage(message);
+  transport.post(message);
 }
 
 function errorMessage(error: unknown): string {
@@ -65,13 +111,18 @@ async function startTerminal(
     throw new Error("Terminal already exists");
   }
 
+  // The worker runs where the capsule executes, so the agent command is
+  // resolved against the capsule PATH on this filesystem.
+  const requested = request.verifyExecutable
+    ? await prepareAgentLaunch(request.launchSpec)
+    : request.launchSpec;
   if (request.verifyExecutable && isolation.backend === "sandbox-runtime") {
     const probe = await wrapSandboxedLaunch(
       {
         command: "/bin/test",
-        args: ["-x", request.launchSpec.command],
-        cwd: request.launchSpec.cwd,
-        env: request.launchSpec.env,
+        args: ["-x", requested.command],
+        cwd: requested.cwd,
+        env: requested.env,
       },
       `${request.terminalId}-executable-probe`,
     );
@@ -83,15 +134,15 @@ async function startTerminal(
       });
     } catch {
       throw new Error(
-        `Agent command '${request.launchSpec.command}' exists but is not reachable inside this target's sandbox`,
+        `Agent command '${requested.command}' exists but is not reachable inside this target's sandbox`,
       );
     } finally {
       cleanupSandboxCommand();
     }
   }
   const launchSpec = isolation.backend === "sandbox-runtime"
-    ? await wrapSandboxedLaunch(request.launchSpec, request.terminalId)
-    : request.launchSpec;
+    ? await wrapSandboxedLaunch(requested, request.terminalId)
+    : requested;
   const terminal = pty.spawn(launchSpec.command, launchSpec.args, {
     name: "xterm-256color",
     cols: request.cols,
@@ -171,11 +222,17 @@ async function handle(request: TerminalWorkerRequest): Promise<void> {
   }
 }
 
-parentPort.on("message", (event) => {
-  void handle(event.data as TerminalWorkerRequest).catch((error: unknown) => {
+transport.onRequest((request) => {
+  void handle(request).catch((error: unknown) => {
     post({ type: "fatal-error", message: errorMessage(error) });
     void shutdown().finally(() => process.exit(1));
   });
+});
+
+// Losing the control channel means the main process is gone; never leave
+// capsule processes running unattended.
+transport.onDisconnect(() => {
+  void shutdown();
 });
 
 process.on("SIGTERM", () => {

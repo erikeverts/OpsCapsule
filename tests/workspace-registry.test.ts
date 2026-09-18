@@ -1,6 +1,6 @@
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, posix } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
@@ -114,6 +114,95 @@ describe("workspace registry", () => {
 
     expect(catalog.workspaces).toHaveLength(0);
     expect(catalog.errors).toHaveLength(1);
+  });
+
+  it("resolves manifest paths with the execution host's path semantics", async () => {
+    const root = await temporaryRoot();
+    const configDirectory = join(root, "config", "workspaces");
+    await mkdir(configDirectory, { recursive: true });
+    await writeFile(
+      join(configDirectory, "remote.yaml"),
+      stringify({
+        apiVersion: "opscapsule.dev/v1alpha1",
+        kind: "Workspace",
+        metadata: { id: "remote", name: "Remote" },
+        kubernetesContexts: [
+          {
+            id: "cluster",
+            name: "Cluster",
+            source: { type: "kubeconfig", path: "kube/config", context: "c" },
+          },
+        ],
+        directories: [
+          { id: "home", name: "Home", path: "~/projects/app", access: "read-write" },
+          { id: "relative", name: "Relative", path: "../repos/docs", access: "read-only" },
+          { id: "absolute", name: "Absolute", path: "/srv/data", access: "read-only" },
+        ],
+        targets: [
+          {
+            id: "default",
+            name: "Default",
+            environment: "development",
+            risk: "development",
+            kubernetesContext: "cluster",
+            directories: ["home", "relative", "absolute"],
+            defaultDirectory: "home",
+            agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
+            isolation: { mode: "enforced", network: { mode: "deny" } },
+          },
+        ],
+      }),
+    );
+    const seeded: string[][] = [];
+    const registry = new WorkspaceRegistry(root, {
+      paths: {
+        home: "/home/ada",
+        path: posix,
+        manifestDirectory: () => "/mnt/c/Users/Ada/opscapsule/config/workspaces",
+      },
+      demoRoot: "/home/ada/.local/state/opscapsule/demo-workspaces",
+      createDemoDirectories: async (directories) => {
+        seeded.push(directories);
+      },
+    });
+    await registry.initialize();
+
+    const target = await registry.resolveTarget("remote", "default");
+
+    expect(seeded).toEqual([]);
+    expect(target.directories.map(({ path }) => path)).toEqual([
+      "/home/ada/projects/app",
+      "/mnt/c/Users/Ada/opscapsule/config/repos/docs",
+      "/srv/data",
+    ]);
+    expect(target.kubernetes?.source).toMatchObject({ path: "kube/config" });
+  });
+
+  it("seeds demo directories on the execution host with its path semantics", async () => {
+    const root = await temporaryRoot();
+    const seeded: string[][] = [];
+    const registry = new WorkspaceRegistry(root, {
+      paths: { home: "/home/ada", path: posix, manifestDirectory: () => "/mnt/c" },
+      demoRoot: "/home/ada/.local/state/opscapsule/demo-workspaces",
+      createDemoDirectories: async (directories) => {
+        seeded.push(directories);
+      },
+    });
+
+    await registry.initialize();
+    const catalog = await registry.catalog();
+
+    expect(seeded).toEqual([
+      [
+        "/home/ada/.local/state/opscapsule/demo-workspaces/atlas/application",
+        "/home/ada/.local/state/opscapsule/demo-workspaces/atlas/documentation",
+        "/home/ada/.local/state/opscapsule/demo-workspaces/borealis/operations",
+      ],
+    ]);
+    expect(catalog.errors).toEqual([]);
+    expect(catalog.workspaces[0]?.targets[0]?.defaultDirectory).toBe(
+      "/home/ada/.local/state/opscapsule/demo-workspaces/atlas/application",
+    );
   });
 
   it("creates and atomically updates a workspace document", async () => {

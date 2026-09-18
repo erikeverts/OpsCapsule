@@ -1,9 +1,9 @@
 import { mkdir, readdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { join, type PlatformPath } from "node:path";
 import { stringify } from "yaml";
 import type { WorkspaceManifest } from "../shared/workspace-schema.js";
 
-function atlasWorkspace(demoRoot: string): WorkspaceManifest {
+function atlasWorkspace(demoRoot: string, path: PlatformPath): WorkspaceManifest {
   return {
     apiVersion: "opscapsule.dev/v1alpha1",
     kind: "Workspace",
@@ -71,13 +71,13 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
       {
         id: "application",
         name: "Application",
-        path: join(demoRoot, "atlas", "application"),
+        path: path.join(demoRoot, "atlas", "application"),
         access: "read-write",
       },
       {
         id: "documentation",
         name: "Documentation",
-        path: join(demoRoot, "atlas", "documentation"),
+        path: path.join(demoRoot, "atlas", "documentation"),
         access: "read-only",
       },
     ],
@@ -114,7 +114,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
   };
 }
 
-function borealisWorkspace(demoRoot: string): WorkspaceManifest {
+function borealisWorkspace(demoRoot: string, path: PlatformPath): WorkspaceManifest {
   return {
     apiVersion: "opscapsule.dev/v1alpha1",
     kind: "Workspace",
@@ -162,7 +162,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
       {
         id: "operations",
         name: "Operations",
-        path: join(demoRoot, "borealis", "operations"),
+        path: path.join(demoRoot, "borealis", "operations"),
         access: "read-write",
       },
     ],
@@ -185,9 +185,43 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
   };
 }
 
+export function demoDirectories(demoRoot: string, path: PlatformPath): string[] {
+  return [
+    path.join(demoRoot, "atlas", "application"),
+    path.join(demoRoot, "atlas", "documentation"),
+    path.join(demoRoot, "borealis", "operations"),
+  ];
+}
+
+// Runs on the execution host, which may differ from the Electron host.
+export async function createDemoDirectories(directories: string[]): Promise<void> {
+  await Promise.all(
+    directories.map((directory) => mkdir(directory, { recursive: true })),
+  );
+  await Promise.all(
+    directories.map((directory) =>
+      writeFile(
+        join(directory, "README.md"),
+        "# Demo directory\n\nThis directory was created by the OpsCapsule iteration 2 example.\n",
+        { encoding: "utf8", flag: "wx" },
+      ).catch((error: NodeJS.ErrnoException) => {
+        if (error.code !== "EEXIST") {
+          throw error;
+        }
+      }),
+    ),
+  );
+}
+
+export interface DemoSeedingOptions {
+  demoRoot: string;
+  path: PlatformPath;
+  createDemoDirectories: (directories: string[]) => Promise<void>;
+}
+
 export async function seedDefaultWorkspaces(
   configDirectory: string,
-  demoRoot: string,
+  options: DemoSeedingOptions,
 ): Promise<void> {
   await mkdir(configDirectory, { recursive: true });
   const seedMarker = join(configDirectory, ".examples-initialized");
@@ -205,33 +239,13 @@ export async function seedDefaultWorkspaces(
     return;
   }
 
-  const demoDirectories = [
-    join(demoRoot, "atlas", "application"),
-    join(demoRoot, "atlas", "documentation"),
-    join(demoRoot, "borealis", "operations"),
-  ];
-
-  await Promise.all([
-    ...demoDirectories.map((directory) => mkdir(directory, { recursive: true })),
-  ]);
-
-  await Promise.all(
-    demoDirectories.map((directory) =>
-      writeFile(
-        join(directory, "README.md"),
-        "# Demo directory\n\nThis directory was created by the OpsCapsule iteration 2 example.\n",
-        { encoding: "utf8", flag: "wx" },
-      ).catch((error: NodeJS.ErrnoException) => {
-        if (error.code !== "EEXIST") {
-          throw error;
-        }
-      }),
-    ),
+  await options.createDemoDirectories(
+    demoDirectories(options.demoRoot, options.path),
   );
 
   const manifests = [
-    ["atlas", atlasWorkspace(demoRoot)],
-    ["borealis", borealisWorkspace(demoRoot)],
+    ["atlas", atlasWorkspace(options.demoRoot, options.path)],
+    ["borealis", borealisWorkspace(options.demoRoot, options.path)],
   ] as const;
 
   await Promise.all(

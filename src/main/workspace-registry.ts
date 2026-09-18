@@ -11,14 +11,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
-import {
+import path, {
   basename,
   dirname,
   isAbsolute,
   join,
   normalize,
   relative,
-  resolve,
+  type PlatformPath,
 } from "node:path";
 import { parse, stringify } from "yaml";
 import { ZodError } from "zod";
@@ -38,7 +38,10 @@ import {
   type WorkspaceTarget,
 } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
-import { seedDefaultWorkspaces } from "./default-workspaces.js";
+import {
+  createDemoDirectories,
+  seedDefaultWorkspaces,
+} from "./default-workspaces.js";
 import {
   extractAwsProfile,
   writeExtractedKubeconfig,
@@ -104,38 +107,79 @@ function assertManagedAgentResourcePaths(
   }
 }
 
+export interface PathResolutionContext {
+  home: string;
+  path: PlatformPath;
+  manifestDirectory(sourcePath: string): string;
+}
+
+export const localPathResolution: PathResolutionContext = {
+  home: homedir(),
+  path,
+  manifestDirectory: (sourcePath) => dirname(sourcePath),
+};
+
 export function resolveConfiguredPath(
   configuredPath: string,
   sourcePath: string,
+  context: PathResolutionContext = localPathResolution,
 ): string {
+  const { home, path: hostPath } = context;
   if (configuredPath === "~") {
-    return homedir();
+    return home;
   }
   if (configuredPath.startsWith("~/")) {
-    return normalize(join(homedir(), configuredPath.slice(2)));
+    return hostPath.normalize(hostPath.join(home, configuredPath.slice(2)));
   }
-  if (isAbsolute(configuredPath)) {
-    return normalize(configuredPath);
+  if (hostPath.isAbsolute(configuredPath)) {
+    return hostPath.normalize(configuredPath);
   }
-  return resolve(dirname(sourcePath), configuredPath);
+  return hostPath.resolve(context.manifestDirectory(sourcePath), configuredPath);
+}
+
+export interface WorkspaceRegistryOptions {
+  cloudAdapters?: CloudAdapterRegistry;
+  paths?: PathResolutionContext;
+  demoRoot?: string;
+  createDemoDirectories?: (directories: string[]) => Promise<void>;
+  // Removes persisted target state on the execution host when a workspace
+  // is deleted. Defaults to the local state directory under baseDirectory.
+  deleteWorkspaceState?: (workspaceId: string) => Promise<void>;
 }
 
 export class WorkspaceRegistry {
   readonly configDirectory: string;
   readonly stateDirectory: string;
   private readonly demoRoot: string;
+  private readonly cloudAdapters: CloudAdapterRegistry;
+  private readonly paths: PathResolutionContext;
+  private readonly createDemoDirectories: (directories: string[]) => Promise<void>;
+  private readonly deleteWorkspaceState: (workspaceId: string) => Promise<void>;
 
-  constructor(
-    baseDirectory: string,
-    private readonly cloudAdapters = new CloudAdapterRegistry(),
-  ) {
+  constructor(baseDirectory: string, options: WorkspaceRegistryOptions = {}) {
     this.configDirectory = join(baseDirectory, "config", "workspaces");
     this.stateDirectory = join(baseDirectory, "state", "workspaces");
-    this.demoRoot = join(baseDirectory, "demo-workspaces");
+    this.cloudAdapters = options.cloudAdapters ?? new CloudAdapterRegistry();
+    this.paths = options.paths ?? localPathResolution;
+    this.demoRoot =
+      options.demoRoot ?? this.paths.path.join(baseDirectory, "demo-workspaces");
+    this.createDemoDirectories =
+      options.createDemoDirectories ?? createDemoDirectories;
+    this.deleteWorkspaceState =
+      options.deleteWorkspaceState ??
+      ((workspaceId) =>
+        rm(join(this.stateDirectory, workspaceId), {
+          recursive: true,
+          force: true,
+        }));
   }
 
   async initialize(): Promise<void> {
-    await seedDefaultWorkspaces(this.configDirectory, this.demoRoot);
+    await seedDefaultWorkspaces(this.configDirectory, {
+      demoRoot: this.demoRoot,
+      path: this.paths.path,
+      createDemoDirectories: this.createDemoDirectories,
+    });
   }
 
   async catalog(): Promise<WorkspaceCatalog> {
@@ -280,10 +324,7 @@ export class WorkspaceRegistry {
       recursive: workspace.sourcePath === managedSourcePath,
       force: false,
     });
-    await rm(join(this.stateDirectory, workspaceId), {
-      recursive: true,
-      force: true,
-    });
+    await this.deleteWorkspaceState(workspaceId);
   }
 
   async resolveTarget(
@@ -634,7 +675,11 @@ export class WorkspaceRegistry {
       }
       return {
         ...directory,
-        path: resolveConfiguredPath(directory.path, workspace.sourcePath),
+        path: resolveConfiguredPath(
+          directory.path,
+          workspace.sourcePath,
+          this.paths,
+        ),
       };
     });
     const defaultDirectory = directories.find(
