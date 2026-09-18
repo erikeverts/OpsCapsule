@@ -1,12 +1,5 @@
 import { isAbsolute, join } from "node:path";
-import {
-  app,
-  BrowserWindow,
-  dialog,
-  ipcMain,
-  Menu,
-  type MenuItemConstructorOptions,
-} from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
@@ -47,36 +40,6 @@ const terminalManager = new TerminalManager({
   data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
   exit: (event) => mainWindow?.webContents.send(IPC.terminalExit, event),
 });
-
-function installApplicationMenu(): void {
-  if (process.platform !== "darwin") {
-    return;
-  }
-
-  const applicationName = app.getName();
-  const template: MenuItemConstructorOptions[] = [
-    {
-      label: applicationName,
-      submenu: [
-        { label: `About ${applicationName}`, role: "about" },
-        { type: "separator" },
-        { role: "services" },
-        { type: "separator" },
-        { label: `Hide ${applicationName}`, role: "hide" },
-        { role: "hideOthers" },
-        { role: "unhide" },
-        { type: "separator" },
-        { label: `Quit ${applicationName}`, role: "quit" },
-      ],
-    },
-    { role: "fileMenu" },
-    { role: "editMenu" },
-    { role: "viewMenu" },
-    { role: "windowMenu" },
-  ];
-
-  Menu.setApplicationMenu(Menu.buildFromTemplate(template));
-}
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listWorkspaces, () => workspaceRegistry.catalog());
@@ -249,7 +212,6 @@ app.whenReady().then(async () => {
       join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
     );
   }
-  installApplicationMenu();
   workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
   await workspaceRegistry.initialize();
   registerIpcHandlers();
