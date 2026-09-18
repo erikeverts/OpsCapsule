@@ -15,8 +15,8 @@ The current iteration provides:
   YAML;
 - form-based management of directories, AWS connections, Kubernetes contexts,
   targets, agent commands, and isolation policies;
-- generated stable workspace and directory ids, plus version-control indicators
-  for configured directories;
+- generated stable ids for workspaces and their resources, plus version-control
+  indicators for configured directories;
 - discovery and workspace-scoped import of local AWS profiles and Kubernetes
   contexts, while excluding AWS access keys and login caches;
 - per-workspace configuration directories and persistent, target-specific cloud

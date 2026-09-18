@@ -53,9 +53,9 @@ caches therefore survive capsule restarts without becoming global or crossing a
 target boundary. Enforced isolation grants write access to only the active
 target's state directory.
 
-Workspace and directory ids are generated from their display names. Workspace
-ids are immutable after creation; directory ids generated for existing
-workspaces remain stable when the display name changes.
+Workspace ids and ids for newly added directories, cloud connections,
+Kubernetes contexts, and targets are generated from their display names. Once a
+resource has been saved, its id remains stable when the display name changes.
 
 Legacy flat `config/workspaces/*.yaml` manifests remain readable. Saving one in
 Workspace Studio migrates it to the directory layout after the new directory has

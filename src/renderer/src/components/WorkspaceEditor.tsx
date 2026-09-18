@@ -16,6 +16,13 @@ import {
   type KubernetesContext,
   type WorkspaceManifest,
 } from "../../../shared/workspace-schema";
+import {
+  renameCloudConnection as renameCloudConnectionDraft,
+  renameDirectory as renameDirectoryDraft,
+  renameKubernetesContext as renameKubernetesContextDraft,
+  renameTarget as renameTargetDraft,
+  type RenameResult,
+} from "../workspace-draft";
 
 type EditorSection =
   | "general"
@@ -249,6 +256,14 @@ export function WorkspaceEditor({
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
     () => (mode === "create" ? new Set(["workspace"]) : new Set()),
   );
+  const [generatedCloudConnectionIds, setGeneratedCloudConnectionIds] = useState<
+    Set<string>
+  >(new Set());
+  const [generatedKubernetesContextIds, setGeneratedKubernetesContextIds] =
+    useState<Set<string>>(new Set());
+  const [generatedTargetIds, setGeneratedTargetIds] = useState<Set<string>>(
+    () => (mode === "create" ? new Set(["development"]) : new Set()),
+  );
 
   useEffect(() => {
     if (mode !== "edit" || !workspaceId) {
@@ -366,44 +381,66 @@ export function WorkspaceEditor({
     setError(null);
   }
 
-  function renameDirectory(index: number, name: string): void {
-    const directory = draft?.directories[index];
-    if (!directory) {
+  function renameTrackedResource(
+    currentId: string | undefined,
+    generatedIds: Set<string>,
+    setGeneratedIds: React.Dispatch<React.SetStateAction<Set<string>>>,
+    rename: (manifest: WorkspaceManifest, regenerate: boolean) => RenameResult,
+  ): void {
+    if (!draft || !currentId) {
       return;
     }
-    const previous = directory.id;
-    const generated = generatedDirectoryIds.has(previous);
-    const id = generated
-      ? uniqueIdentifier(
-          name,
-          draft.directories
-            .filter((_, itemIndex) => itemIndex !== index)
-            .map((item) => item.id),
-        )
-      : previous;
-    updateDraft((next) => {
-      const item = next.directories[index]!;
-      item.name = name;
-      item.id = id;
-      if (id !== previous) {
-        for (const target of next.targets) {
-          target.directories = target.directories.map((directoryId) =>
-            directoryId === previous ? id : directoryId,
-          );
-          if (target.defaultDirectory === previous) {
-            target.defaultDirectory = id;
-          }
-        }
-      }
-    });
-    if (generated && id !== previous) {
-      setGeneratedDirectoryIds((current) => {
+    const regenerate = generatedIds.has(currentId);
+    const result = rename(structuredClone(draft), regenerate);
+    updateDraft((next) => void rename(next, regenerate));
+    if (regenerate && result.id !== result.previousId) {
+      setGeneratedIds((current) => {
         const next = new Set(current);
-        next.delete(previous);
-        next.add(id);
+        next.delete(result.previousId);
+        next.add(result.id);
         return next;
       });
     }
+  }
+
+  function renameDirectory(index: number, name: string): void {
+    renameTrackedResource(
+      draft?.directories[index]?.id,
+      generatedDirectoryIds,
+      setGeneratedDirectoryIds,
+      (manifest, regenerate) =>
+        renameDirectoryDraft(manifest, index, name, regenerate),
+    );
+  }
+
+  function renameCloudConnection(index: number, name: string): void {
+    renameTrackedResource(
+      draft?.cloudConnections[index]?.id,
+      generatedCloudConnectionIds,
+      setGeneratedCloudConnectionIds,
+      (manifest, regenerate) =>
+        renameCloudConnectionDraft(manifest, index, name, regenerate),
+    );
+  }
+
+  function renameKubernetesContext(index: number, name: string): void {
+    renameTrackedResource(
+      draft?.kubernetesContexts[index]?.id,
+      generatedKubernetesContextIds,
+      setGeneratedKubernetesContextIds,
+      (manifest, regenerate) =>
+        renameKubernetesContextDraft(manifest, index, name, regenerate),
+    );
+  }
+
+  function renameTarget(index: number, name: string): void {
+    renameTrackedResource(
+      draft?.targets[index]?.id,
+      generatedTargetIds,
+      setGeneratedTargetIds,
+      (manifest, regenerate) =>
+        renameTargetDraft(manifest, index, name, regenerate),
+    );
   }
 
   async function save(): Promise<void> {
@@ -424,6 +461,10 @@ export function WorkspaceEditor({
       setDocument(saved);
       setDraft(structuredClone(saved.manifest));
       setBaselineYaml(stringify(saved.manifest, { lineWidth: 0 }));
+      setGeneratedDirectoryIds(new Set());
+      setGeneratedCloudConnectionIds(new Set());
+      setGeneratedKubernetesContextIds(new Set());
+      setGeneratedTargetIds(new Set());
       await onSaved(saved.manifest.metadata.id);
     } catch (reason) {
       setError(describeValidationError(reason));
@@ -714,15 +755,19 @@ export function WorkspaceEditor({
                 action={
                   <button
                     className="small-button"
-                    onClick={() =>
+                    onClick={() => {
+                      const name = "AWS account";
+                      const id = uniqueIdentifier(
+                        name,
+                        draft.cloudConnections.map((item) => item.id),
+                      );
+                      setGeneratedCloudConnectionIds((current) =>
+                        new Set(current).add(id),
+                      );
                       updateDraft((next) => {
-                        const id = uniqueIdentifier(
-                          "aws",
-                          next.cloudConnections.map((item) => item.id),
-                        );
                         next.cloudConnections.push({
                           id,
-                          name: "AWS account",
+                          name,
                           provider: "aws",
                           config: {
                             authentication: { type: "profile", profile: "" },
@@ -730,8 +775,8 @@ export function WorkspaceEditor({
                             defaults: { region: "" },
                           },
                         });
-                      })
-                    }
+                      });
+                    }}
                     type="button"
                   >
                     + Add connection
@@ -790,27 +835,21 @@ export function WorkspaceEditor({
                           <input
                             value={connection.name}
                             onChange={(event) =>
-                              updateDraft((next) => {
-                                next.cloudConnections[index]!.name = event.target.value;
-                              })
+                              renameCloudConnection(index, event.target.value)
                             }
                           />
                         </Field>
-                        <Field label="Id">
+                        <Field
+                          label="Id"
+                          hint={
+                            generatedCloudConnectionIds.has(connection.id)
+                              ? "Generated from the connection name."
+                              : "Stable after the workspace is saved."
+                          }
+                        >
                           <input
+                            disabled
                             value={connection.id}
-                            onChange={(event) =>
-                              updateDraft((next) => {
-                                const item = next.cloudConnections[index]!;
-                                const previous = item.id;
-                                item.id = event.target.value;
-                                for (const target of next.targets) {
-                                  if (target.cloudConnection === previous) {
-                                    target.cloudConnection = item.id;
-                                  }
-                                }
-                              })
-                            }
                           />
                         </Field>
                         <Field label="Provider">
@@ -935,19 +974,23 @@ export function WorkspaceEditor({
                 action={
                   <button
                     className="small-button"
-                    onClick={() =>
+                    onClick={() => {
+                      const name = "Kubernetes cluster";
+                      const id = uniqueIdentifier(
+                        name,
+                        draft.kubernetesContexts.map((item) => item.id),
+                      );
+                      setGeneratedKubernetesContextIds((current) =>
+                        new Set(current).add(id),
+                      );
                       updateDraft((next) => {
-                        const id = uniqueIdentifier(
-                          "cluster",
-                          next.kubernetesContexts.map((item) => item.id),
-                        );
                         next.kubernetesContexts.push({
                           id,
-                          name: "Kubernetes cluster",
+                          name,
                           source: { type: "kubeconfig", path: "", context: "" },
                         });
-                      })
-                    }
+                      });
+                    }}
                     type="button"
                   >
                     + Add context
@@ -990,27 +1033,21 @@ export function WorkspaceEditor({
                         <input
                           value={context.name}
                           onChange={(event) =>
-                            updateDraft((next) => {
-                              next.kubernetesContexts[index]!.name = event.target.value;
-                            })
+                            renameKubernetesContext(index, event.target.value)
                           }
                         />
                       </Field>
-                      <Field label="Id">
+                      <Field
+                        label="Id"
+                        hint={
+                          generatedKubernetesContextIds.has(context.id)
+                            ? "Generated from the context name."
+                            : "Stable after the workspace is saved."
+                        }
+                      >
                         <input
+                          disabled
                           value={context.id}
-                          onChange={(event) =>
-                            updateDraft((next) => {
-                              const item = next.kubernetesContexts[index]!;
-                              const previous = item.id;
-                              item.id = event.target.value;
-                              for (const target of next.targets) {
-                                if (target.kubernetesContext === previous) {
-                                  target.kubernetesContext = item.id;
-                                }
-                              }
-                            })
-                          }
                         />
                       </Field>
                       <Field label="Namespace">
@@ -1205,16 +1242,20 @@ export function WorkspaceEditor({
                 action={
                   <button
                     className="small-button"
-                    onClick={() =>
+                    onClick={() => {
+                      const name = "Target";
+                      const id = uniqueIdentifier(
+                        name,
+                        draft.targets.map((item) => item.id),
+                      );
+                      const firstDirectory = draft.directories[0]?.id ?? "";
+                      setGeneratedTargetIds((current) =>
+                        new Set(current).add(id),
+                      );
                       updateDraft((next) => {
-                        const id = uniqueIdentifier(
-                          "target",
-                          next.targets.map((item) => item.id),
-                        );
-                        const firstDirectory = next.directories[0]?.id ?? "";
                         next.targets.push({
                           id,
-                          name: "Target",
+                          name,
                           environment: id,
                           risk: "development",
                           directories: firstDirectory ? [firstDirectory] : [],
@@ -1229,8 +1270,8 @@ export function WorkspaceEditor({
                             network: { mode: "public", allowedDomains: [] },
                           },
                         });
-                      })
-                    }
+                      });
+                    }}
                     type="button"
                   >
                     + Add target
@@ -1268,20 +1309,21 @@ export function WorkspaceEditor({
                         <input
                           value={target.name}
                           onChange={(event) =>
-                            updateDraft((next) => {
-                              next.targets[index]!.name = event.target.value;
-                            })
+                            renameTarget(index, event.target.value)
                           }
                         />
                       </Field>
-                      <Field label="Id">
+                      <Field
+                        label="Id"
+                        hint={
+                          generatedTargetIds.has(target.id)
+                            ? "Generated from the target name."
+                            : "Stable after the workspace is saved."
+                        }
+                      >
                         <input
+                          disabled
                           value={target.id}
-                          onChange={(event) =>
-                            updateDraft((next) => {
-                              next.targets[index]!.id = event.target.value;
-                            })
-                          }
                         />
                       </Field>
                       <Field label="Environment">
