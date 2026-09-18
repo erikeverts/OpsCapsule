@@ -281,7 +281,9 @@ export function App() {
     >
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">OC</div>
+          <div className="brand-mark">
+            <img alt="" src="./opscapsule.svg" />
+          </div>
           <div>
             <strong>OpsCapsule</strong>
             <span>Context, contained.</span>

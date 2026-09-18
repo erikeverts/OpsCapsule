@@ -52,18 +52,16 @@ button {
 }
 
 .brand-mark {
-  display: grid;
   width: 39px;
   height: 39px;
-  place-items: center;
-  border: 1px solid #5dcad0;
-  border-radius: 12px;
-  color: #071115;
-  background: linear-gradient(145deg, #8cebf2, #4eafb8);
-  box-shadow: 0 0 24px rgb(91 207 216 / 15%);
-  font-size: 12px;
-  font-weight: 800;
-  letter-spacing: -0.04em;
+  flex: 0 0 auto;
+  filter: drop-shadow(0 0 12px rgb(91 207 216 / 12%));
+}
+
+.brand-mark img {
+  display: block;
+  width: 100%;
+  height: 100%;
 }
 
 .brand strong,
@@ -247,8 +245,9 @@ button {
 }
 
 .production-active .brand-mark {
-  border-color: #d87a70;
-  background: linear-gradient(145deg, #f0a096, #b75f57);
+  filter:
+    drop-shadow(0 0 10px rgb(216 122 112 / 36%))
+    saturate(0.72);
 }
 
 .production-active .live-indicator {

@@ -6,6 +6,7 @@
   "type": "module",
   "main": "dist/main.cjs",
   "scripts": {
+    "icons": "node scripts/generate-icons.mjs",
     "dev": "npm run build:main && concurrently -k -n renderer,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --config vite.config.ts",
     "dev:electron": "wait-on tcp:5173 && cross-env OPSCAPSULE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
@@ -37,6 +38,7 @@
     "cross-env": "10.1.0",
     "electron": "44.4.1",
     "esbuild": "0.28.2",
+    "sharp": "0.35.4",
     "typescript": "7.0.2",
     "vite": "8.3.0",
     "vitest": "5.0.1",

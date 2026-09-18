@@ -158,12 +158,20 @@ function registerIpcHandlers(): void {
 }
 
 async function createWindow(): Promise<void> {
+  const applicationIcon = join(
+    app.getAppPath(),
+    "assets",
+    "icons",
+    "png",
+    "256x256.png",
+  );
   mainWindow = new BrowserWindow({
     width: 1500,
     height: 940,
     minWidth: 1000,
     minHeight: 650,
     backgroundColor: "#0b1117",
+    icon: applicationIcon,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -197,6 +205,11 @@ app.whenReady().then(async () => {
     return;
   }
   await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(
+      join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
+    );
+  }
   workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
   await workspaceRegistry.initialize();
   registerIpcHandlers();

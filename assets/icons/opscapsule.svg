@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" role="img" aria-labelledby="title description">
+  <title id="title">OpsCapsule application icon</title>
+  <desc id="description">A terminal prompt and cursor surrounded by two open capsule rings.</desc>
+  <defs>
+    <linearGradient id="background" x1="150" y1="64" x2="836" y2="954" gradientUnits="userSpaceOnUse">
+      <stop offset="0" stop-color="#0a1d35" />
+      <stop offset="0.55" stop-color="#07172b" />
+      <stop offset="1" stop-color="#041121" />
+    </linearGradient>
+    <radialGradient id="backgroundGlow" cx="0" cy="0" r="1" gradientTransform="translate(512 460) rotate(90) scale(500)" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#173652" stop-opacity="0.32" />
+      <stop offset="1" stop-color="#061425" stop-opacity="0" />
+    </radialGradient>
+    <linearGradient id="outerRing" x1="190" y1="194" x2="827" y2="831" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#29e9ec" />
+      <stop offset="0.5" stop-color="#54f2f2" />
+      <stop offset="1" stop-color="#2bdfe5" />
+    </linearGradient>
+    <linearGradient id="innerRing" x1="302" y1="299" x2="718" y2="737" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#38c7c3" />
+      <stop offset="0.52" stop-color="#30b9b6" />
+      <stop offset="1" stop-color="#41d0cb" />
+    </linearGradient>
+    <linearGradient id="prompt" x1="422" y1="400" x2="646" y2="644" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#ffffff" />
+      <stop offset="1" stop-color="#f4f1e9" />
+    </linearGradient>
+  </defs>
+
+  <g>
+    <rect x="32" y="32" width="960" height="960" rx="184" fill="url(#background)" />
+    <rect x="32.5" y="32.5" width="959" height="959" rx="183.5" fill="none" stroke="#143451" stroke-opacity="0.72" />
+    <rect x="32" y="32" width="960" height="960" rx="184" fill="url(#backgroundGlow)" />
+  </g>
+
+  <g fill="none" stroke-linecap="round">
+    <path d="M 466 170 C 286 193 157 338 157 512 C 157 686 286 831 466 854" stroke="url(#outerRing)" stroke-width="64" />
+    <path d="M 558 170 C 738 193 867 338 867 512 C 867 686 738 831 558 854" stroke="url(#outerRing)" stroke-width="64" />
+    <path d="M 470 278 C 341 297 254 396 254 512 C 254 628 341 727 470 746" stroke="url(#innerRing)" stroke-width="54" />
+    <path d="M 554 278 C 683 297 770 396 770 512 C 770 628 683 727 554 746" stroke="url(#innerRing)" stroke-width="54" />
+  </g>
+
+  <g>
+    <path d="M 437 408 L 557 512 L 437 616" fill="none" stroke="url(#prompt)" stroke-width="58" stroke-linecap="round" stroke-linejoin="round" />
+    <rect x="608" y="588" width="57" height="57" rx="7" fill="url(#prompt)" />
+  </g>
+</svg>
