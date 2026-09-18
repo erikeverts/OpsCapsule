@@ -21,6 +21,9 @@ import {
 } from "node:path";
 import { parse, stringify } from "yaml";
 import type {
+  AgentConfigurationFileOption,
+  AgentConfigurationInspection,
+  AgentConfigurationWarning,
   AwsProfileOption,
   DirectoryInspection,
   KubernetesContextOption,
@@ -219,6 +222,162 @@ export async function discoverKubernetesContexts(
   );
 }
 
+export async function discoverAgentConfigurationFiles(
+  homeDirectory = homedir(),
+): Promise<
+  AgentConfigurationFileOption[]
+> {
+  const candidates: AgentConfigurationFileOption[] = [
+    {
+      adapter: "opencode",
+      name: "OpenCode settings",
+      path: join(homeDirectory, ".config", "opencode", "opencode.json"),
+      destination: ".config/opencode/opencode.json",
+      warnings: [],
+    },
+    {
+      adapter: "opencode",
+      name: "OpenCode terminal settings",
+      path: join(homeDirectory, ".config", "opencode", "tui.json"),
+      destination: ".config/opencode/tui.json",
+      warnings: [],
+    },
+    {
+      adapter: "claude-code",
+      name: "Claude Code settings",
+      path: join(homeDirectory, ".claude", "settings.json"),
+      destination: ".claude/settings.json",
+      warnings: [],
+    },
+  ];
+  const discovered = await Promise.all(
+    candidates.map(async (candidate) => {
+      if (!(await readable(candidate.path))) {
+        return undefined;
+      }
+      try {
+        const inspection = await inspectAgentConfigurationFile(candidate.path);
+        return { ...candidate, warnings: inspection.warnings };
+      } catch {
+        return {
+          ...candidate,
+          warnings: [
+            {
+              category: "unparsed" as const,
+              severity: "warning" as const,
+              message: "The file could not be inspected; review it before importing.",
+            },
+          ],
+        };
+      }
+    }),
+  );
+  return discovered.filter(
+    (candidate): candidate is AgentConfigurationFileOption => Boolean(candidate),
+  );
+}
+
+const configurationConcernPatterns: Array<{
+  category: AgentConfigurationWarning["category"];
+  severity: AgentConfigurationWarning["severity"];
+  pattern: RegExp;
+  message: string;
+}> = [
+  {
+    category: "identity",
+    severity: "danger",
+    pattern: /(?:^|[._-])(?:home|kubeconfig|aws[_-]?(?:profile|default[_-]?profile|access[_-]?key[_-]?id|secret[_-]?access[_-]?key|session[_-]?token)|xdg[_-]?(?:config|data|cache|state)[_-]?home|tmpdir|claude[_-]?config[_-]?dir|opscapsule[_-][a-z0-9_-]+)(?:$|[._-])/i,
+    message: "Settings may override capsule-managed identity or isolation paths.",
+  },
+  {
+    category: "credentials",
+    severity: "danger",
+    pattern: /(?:^|[._-])(?:api[_-]?key|access[_-]?key|token|secret|password|credentials?|authentication|auth)(?:$|[._-])/i,
+    message: "Potential credential or authentication settings are present.",
+  },
+  {
+    category: "hooks",
+    severity: "warning",
+    pattern: /(?:^|[._-])(?:hooks?|commands?|scripts?)(?:$|[._-])/i,
+    message: "Executable hooks or commands may be declared.",
+  },
+  {
+    category: "plugins",
+    severity: "warning",
+    pattern: /(?:plugin|marketplace)/i,
+    message: "Plugin or marketplace configuration is present.",
+  },
+  {
+    category: "mcp",
+    severity: "warning",
+    pattern: /(?:^|[._-])mcp(?:servers?)?(?:$|[._-])/i,
+    message: "MCP server configuration is present.",
+  },
+];
+
+function configurationKeys(value: unknown, prefix = ""): string[] {
+  if (Array.isArray(value)) {
+    return value.flatMap((item, index) =>
+      configurationKeys(item, `${prefix}.${index}`),
+    );
+  }
+  if (!value || typeof value !== "object") {
+    return [];
+  }
+  return Object.entries(value as Record<string, unknown>).flatMap(
+    ([key, child]) => {
+      const path = prefix ? `${prefix}.${key}` : key;
+      return [path, ...configurationKeys(child, path)];
+    },
+  );
+}
+
+export async function inspectAgentConfigurationFile(
+  path: string,
+): Promise<AgentConfigurationInspection> {
+  const info = await stat(path);
+  if (!info.isFile()) {
+    throw new Error(`Agent configuration is not a regular file: ${path}`);
+  }
+  if (info.size > 1_000_000) {
+    return {
+      path,
+      warnings: [
+        {
+          category: "unparsed",
+          severity: "warning",
+          message: "The file is larger than 1 MB and was not inspected.",
+        },
+      ],
+    };
+  }
+
+  const content = await readFile(path, "utf8");
+  let keys: string[];
+  const warnings: AgentConfigurationWarning[] = [];
+  try {
+    keys = configurationKeys(JSON.parse(content));
+  } catch {
+    keys = content.match(/[A-Za-z_$][A-Za-z0-9_$.-]*/g) ?? [];
+    warnings.push({
+      category: "unparsed",
+      severity: "warning",
+      message: "The file is not strict JSON; inspection used a conservative text scan.",
+    });
+  }
+
+  for (const concern of configurationConcernPatterns) {
+    if (keys.some((key) => concern.pattern.test(key))) {
+      warnings.push({
+        category: concern.category,
+        severity: concern.severity,
+        message: concern.message,
+      });
+    }
+  }
+  return { path, warnings };
+}
+
 async function stageReferencedFile(
   value: unknown,
   sourceDirectory: string,
@@ -357,9 +516,10 @@ export async function inspectDirectory(path: string): Promise<DirectoryInspectio
 }
 
 export async function discoverLocalResources(): Promise<LocalResourceOptions> {
-  const [awsProfiles, kubernetesContexts] = await Promise.all([
+  const [awsProfiles, kubernetesContexts, agentConfigurationFiles] = await Promise.all([
     discoverAwsProfiles(),
     discoverKubernetesContexts(),
+    discoverAgentConfigurationFiles(),
   ]);
-  return { awsProfiles, kubernetesContexts };
+  return { awsProfiles, kubernetesContexts, agentConfigurationFiles };
 }

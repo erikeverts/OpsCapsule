@@ -101,6 +101,35 @@ export function renameKubernetesContext(
   return { previousId, id };
 }
 
+export function renameAgentProfile(
+  manifest: WorkspaceManifest,
+  index: number,
+  name: string,
+  regenerate: boolean,
+): RenameResult {
+  const profile = manifest.agentProfiles[index]!;
+  const previousId = profile.id;
+  const id = nextId(
+    name,
+    previousId,
+    manifest.agentProfiles.map((item) => item.id),
+    regenerate,
+  );
+  profile.name = name;
+  profile.id = id;
+  if (id !== previousId) {
+    if (manifest.defaultAgentProfile === previousId) {
+      manifest.defaultAgentProfile = id;
+    }
+    for (const target of manifest.targets) {
+      if (target.agentProfile === previousId) {
+        target.agentProfile = id;
+      }
+    }
+  }
+  return { previousId, id };
+}
+
 export function renameTarget(
   manifest: WorkspaceManifest,
   index: number,

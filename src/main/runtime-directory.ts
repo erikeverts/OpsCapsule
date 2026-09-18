@@ -6,6 +6,7 @@ import {
   mkdtemp,
   mkdir,
   readdir,
+  realpath,
   rename,
   rm,
   stat,
@@ -13,27 +14,31 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { stringify } from "yaml";
 import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
-import { extractKubeconfigContext } from "./local-resources.js";
+import {
+  extractKubeconfigContext,
+  inspectAgentConfigurationFile,
+} from "./local-resources.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 import { resolveConfiguredPath } from "./workspace-registry.js";
 
-const contextEnvironmentVariables = [
-  "AWS_ACCESS_KEY_ID",
-  "AWS_SECRET_ACCESS_KEY",
-  "AWS_SESSION_TOKEN",
-  "AWS_PROFILE",
-  "AWS_DEFAULT_PROFILE",
-  "AWS_REGION",
-  "AWS_DEFAULT_REGION",
-  "AWS_CONFIG_FILE",
-  "AWS_SHARED_CREDENTIALS_FILE",
-  "KUBECONFIG",
-] as const;
+const inheritedEnvironmentVariables = new Set([
+  "PATH",
+  "SHELL",
+  "TERM",
+  "COLORTERM",
+  "LANG",
+  "USER",
+  "LOGNAME",
+  "TZ",
+  "NO_COLOR",
+  "CLICOLOR",
+  "CLICOLOR_FORCE",
+]);
 
 function generatedKubeconfig(kubernetes: KubernetesContext): object {
   if (kubernetes.source.type !== "generated") {
@@ -168,6 +173,93 @@ async function prepareCloudState(
   );
 }
 
+function assertContainedPath(root: string, candidate: string, label: string): void {
+  const pathFromRoot = relative(root, candidate);
+  if (
+    pathFromRoot.split(/[\\/]/)[0] === ".." ||
+    isAbsolute(pathFromRoot)
+  ) {
+    throw new Error(`${label} escapes its managed root`);
+  }
+}
+
+async function prepareAgentState(
+  home: string,
+  agentState: string,
+  resolvedTarget: ResolvedWorkspaceTarget,
+  agentInstructions?: string,
+): Promise<void> {
+  await assertStateDirectory(agentState);
+  await Promise.all(
+    ["data", "cache", "sessions"].map(async (name) => {
+      await assertStateDirectory(join(agentState, name));
+    }),
+  );
+
+  const { profile } = resolvedTarget.agent;
+  if (profile.configuration.files.length > 0) {
+    const workspaceRoot = dirname(resolvedTarget.workspace.sourcePath);
+    const resourceRoot = await realpath(
+      join(workspaceRoot, "resources", "agents", profile.id),
+    );
+    const canonicalHome = await realpath(home);
+    for (const file of profile.configuration.files) {
+      const source = await realpath(
+        resolveConfiguredPath(file.source, resolvedTarget.workspace.sourcePath),
+      );
+      assertContainedPath(
+        resourceRoot,
+        source,
+        `Agent profile '${profile.id}' configuration source '${file.source}'`,
+      );
+      const sourceInfo = await lstat(source);
+      if (!sourceInfo.isFile()) {
+        throw new Error(
+          `Agent profile '${profile.id}' configuration source '${file.source}' is not a regular file`,
+        );
+      }
+      const inspection = await inspectAgentConfigurationFile(source);
+      if (inspection.warnings.some(({ category }) => category === "identity")) {
+        throw new Error(
+          `Agent profile '${profile.id}' configuration source '${file.source}' may override capsule-managed identity or isolation paths`,
+        );
+      }
+
+      const destination = resolve(
+        canonicalHome,
+        ...file.destination.replaceAll("\\", "/").split("/"),
+      );
+      assertContainedPath(
+        canonicalHome,
+        destination,
+        `Agent profile '${profile.id}' configuration destination '${file.destination}'`,
+      );
+      await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+      await copyFile(source, destination);
+      await chmod(destination, 0o600);
+    }
+  }
+
+  if (profile.adapter === "opencode" && agentInstructions) {
+    const destination = join(home, ".config", "opencode", "AGENTS.md");
+    await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+    await copyFile(agentInstructions, destination);
+    await chmod(destination, 0o600);
+  }
+
+  if (profile.adapter === "claude-code") {
+    const claudeState = join(agentState, "data", "claude");
+    const destination = join(claudeState, "CLAUDE.md");
+    await assertStateDirectory(claudeState);
+    if (agentInstructions) {
+      await copyFile(agentInstructions, destination);
+      await chmod(destination, 0o600);
+    } else {
+      await rm(destination, { force: true });
+    }
+  }
+}
+
 async function writeKubeconfig(
   destination: string,
   resolvedTarget: ResolvedWorkspaceTarget,
@@ -229,6 +321,9 @@ export async function createWorkspaceRuntime(
   );
   const kubeconfig = join(root, "kubeconfig.yaml");
   const sandboxConfig = join(root, "sandbox.json");
+  const agentInstructions = resolvedTarget.workspace.manifest.agentInstructions
+    ? join(root, "agent-instructions.md")
+    : undefined;
   const targetState = join(
     baseDirectory,
     "state",
@@ -237,6 +332,11 @@ export async function createWorkspaceRuntime(
     "targets",
     resolvedTarget.target.id,
   );
+  const agentState = join(
+    targetState,
+    "agents",
+    resolvedTarget.agent.profile.id,
+  );
 
   await Promise.all([
     mkdir(home, { recursive: true, mode: 0o700 }),
@@ -244,7 +344,15 @@ export async function createWorkspaceRuntime(
     mkdir(dirname(targetState), { recursive: true, mode: 0o700 }),
   ]);
   await assertStateDirectory(targetState);
+  if (agentInstructions) {
+    await writeFile(
+      agentInstructions,
+      resolvedTarget.workspace.manifest.agentInstructions!,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
   await prepareCloudState(home, targetState, resolvedTarget);
+  await prepareAgentState(home, agentState, resolvedTarget, agentInstructions);
   await Promise.all([
     writeKubeconfig(kubeconfig, resolvedTarget),
     writeShellConfiguration(
@@ -254,7 +362,16 @@ export async function createWorkspaceRuntime(
     ),
   ]);
 
-  return { root, home, temp, kubeconfig, sandboxConfig, targetState };
+  return {
+    root,
+    home,
+    temp,
+    kubeconfig,
+    sandboxConfig,
+    targetState,
+    agentState,
+    ...(agentInstructions ? { agentInstructions } : {}),
+  };
 }
 
 export async function cleanupWorkspaceRuntime(runtime: RuntimePaths): Promise<void> {
@@ -296,12 +413,12 @@ export function buildWorkspaceEnvironment(
 ): Record<string, string> {
   const environment = Object.fromEntries(
     Object.entries(inheritedEnvironment).filter(
-      (entry): entry is [string, string] => entry[1] !== undefined,
+      (entry): entry is [string, string] =>
+        entry[1] !== undefined &&
+        (inheritedEnvironmentVariables.has(entry[0]) ||
+          entry[0].startsWith("LC_")),
     ),
   );
-  for (const variable of contextEnvironmentVariables) {
-    delete environment[variable];
-  }
 
   const cloudEnvironment = resolvedTarget.cloud
     ? cloudAdapters.environment(resolvedTarget.cloud, {
@@ -323,6 +440,9 @@ export function buildWorkspaceEnvironment(
     OPSCAPSULE_WORKSPACE: resolvedTarget.workspace.manifest.metadata.id,
     OPSCAPSULE_TARGET: resolvedTarget.target.id,
     OPSCAPSULE_ENVIRONMENT: resolvedTarget.target.environment,
+    ...(runtime.agentInstructions
+      ? { OPSCAPSULE_AGENT_INSTRUCTIONS: runtime.agentInstructions }
+      : {}),
     ...(resolvedTarget.kubernetes
       ? {
           OPSCAPSULE_CLUSTER: resolvedTarget.kubernetes.source.context,

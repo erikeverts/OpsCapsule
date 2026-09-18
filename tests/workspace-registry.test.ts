@@ -39,6 +39,11 @@ describe("workspace registry", () => {
     expect(atlas?.targets[0]?.cloud?.identity).toBe("111122223333");
     expect(atlas?.targets[1]?.cloud?.identity).toBe("999900001111");
     expect(atlas?.targets[0]?.directories).toHaveLength(2);
+    expect(atlas?.targets[0]?.agent).toMatchObject({
+      id: "default-agent",
+      adapter: "command",
+      legacy: false,
+    });
   });
 
   it("reports invalid manifests without hiding valid ones", async () => {
@@ -56,6 +61,45 @@ describe("workspace registry", () => {
     expect(catalog.workspaces).toHaveLength(2);
     expect(catalog.errors).toHaveLength(1);
     expect(catalog.errors[0]?.sourcePath).toContain("broken.yaml");
+  });
+
+  it("rejects persisted agent configuration outside managed resources", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    const manifest = structuredClone(document.manifest);
+    manifest.metadata = { id: "unsafe-agent", name: "Unsafe Agent" };
+    manifest.agentProfiles = [
+      {
+        id: "custom",
+        name: "Custom",
+        adapter: "command",
+        runtime: { command: "custom-agent", args: [] },
+        configuration: {
+          files: [
+            {
+              source: "/tmp/outside.json",
+              destination: ".config/custom/config.json",
+            },
+          ],
+        },
+        environment: {},
+      },
+    ];
+    manifest.defaultAgentProfile = "custom";
+    const workspaceRoot = join(registry.configDirectory, "unsafe-agent");
+    await mkdir(workspaceRoot, { recursive: true });
+    await writeFile(join(workspaceRoot, "workspace.yaml"), stringify(manifest));
+
+    const catalog = await registry.catalog();
+
+    expect(catalog.workspaces.some(({ id }) => id === "unsafe-agent")).toBe(false);
+    expect(
+      catalog.errors.some(({ message }) =>
+        message.includes("outside its managed resource directory"),
+      ),
+    ).toBe(true);
   });
 
   it("does not replace a user's existing manifest with examples", async () => {
@@ -103,6 +147,37 @@ describe("workspace registry", () => {
       (await registry.document("customer-platform")).manifest.metadata
         .description,
     ).toBe("Edited in Workspace Studio");
+  });
+
+  it("uses a target agent profile override before the workspace default", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    document.manifest.agentProfiles.push({
+      id: "opencode",
+      name: "OpenCode",
+      adapter: "opencode",
+      runtime: { command: "opencode", args: [] },
+      configuration: { files: [] },
+      environment: {},
+    });
+    document.manifest.targets[1]!.agentProfile = "opencode";
+    await registry.save("atlas", document.revision, document.manifest);
+
+    const development = await registry.resolveTarget("atlas", "development");
+    const production = await registry.resolveTarget("atlas", "production");
+
+    expect(development.summary.agent).toMatchObject({
+      id: "default-agent",
+      adapter: "command",
+      legacy: false,
+    });
+    expect(production.summary.agent).toMatchObject({
+      id: "opencode",
+      adapter: "opencode",
+      legacy: false,
+    });
   });
 
   it("refuses to overwrite a workspace changed outside the editor", async () => {

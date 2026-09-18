@@ -12,8 +12,10 @@ import { afterEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import {
   discoverAwsProfiles,
+  discoverAgentConfigurationFiles,
   discoverKubernetesContexts,
   extractAwsProfile,
+  inspectAgentConfigurationFile,
   inspectDirectory,
   writeExtractedKubeconfig,
 } from "../src/main/local-resources.js";
@@ -49,6 +51,74 @@ describe("generated identifiers", () => {
 });
 
 describe("local resource discovery", () => {
+  it("discovers only supported OpenCode configuration files", async () => {
+    const root = await temporaryRoot();
+    const configDirectory = join(root, ".config", "opencode");
+    await mkdir(configDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(configDirectory, "opencode.json"), "{}\n"),
+      writeFile(join(configDirectory, "tui.json"), "{}\n"),
+      writeFile(join(configDirectory, "auth.json"), '{"secret":"no"}\n'),
+    ]);
+
+    const files = await discoverAgentConfigurationFiles(root);
+
+    expect(files.map(({ path }) => path)).toEqual([
+      join(configDirectory, "opencode.json"),
+      join(configDirectory, "tui.json"),
+    ]);
+    expect(files.some(({ path }) => path.endsWith("auth.json"))).toBe(false);
+  });
+
+  it("discovers Claude Code settings without importing credentials or history", async () => {
+    const root = await temporaryRoot();
+    const configDirectory = join(root, ".claude");
+    await mkdir(configDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(configDirectory, "settings.json"), '{"hooks":{}}\n'),
+      writeFile(join(configDirectory, ".credentials.json"), '{"token":"no"}\n'),
+      writeFile(join(configDirectory, "history.jsonl"), '{}\n'),
+    ]);
+
+    const files = await discoverAgentConfigurationFiles(root);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      adapter: "claude-code",
+      destination: ".claude/settings.json",
+    });
+    expect(files[0]?.warnings.map(({ category }) => category)).toContain("hooks");
+  });
+
+  it("reports structured concerns without returning configuration values", async () => {
+    const root = await temporaryRoot();
+    const config = join(root, "settings.json");
+    await writeFile(
+      config,
+      JSON.stringify({
+        env: { API_TOKEN: "must-not-leak", AWS_PROFILE: "wrong-target" },
+        hooks: { PreToolUse: [{ command: "review-command" }] },
+        mcpServers: { tickets: { command: "ticket-mcp" } },
+        enabledPlugins: { example: true },
+      }),
+    );
+
+    const inspection = await inspectAgentConfigurationFile(config);
+
+    expect(inspection.warnings.map(({ category }) => category)).toEqual(
+      expect.arrayContaining([
+        "identity",
+        "credentials",
+        "hooks",
+        "mcp",
+        "plugins",
+      ]),
+    );
+    expect(JSON.stringify(inspection)).not.toContain("must-not-leak");
+    expect(JSON.stringify(inspection)).not.toContain("review-command");
+    expect(JSON.stringify(inspection)).not.toContain("wrong-target");
+  });
+
   it("discovers AWS profiles and copies only the selected dependency chain", async () => {
     const root = await temporaryRoot();
     const configFile = join(root, "aws-config");

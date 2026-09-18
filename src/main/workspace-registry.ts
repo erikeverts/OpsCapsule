@@ -1,5 +1,8 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
+  chmod,
+  copyFile,
+  lstat,
   mkdir,
   readFile,
   readdir,
@@ -28,6 +31,7 @@ import type {
 import {
   parseWorkspaceManifest,
   type CloudConnection,
+  type AgentProfile,
   type KubernetesContext,
   type WorkspaceDirectory,
   type WorkspaceManifest,
@@ -52,7 +56,13 @@ export interface ResolvedWorkspaceTarget {
   kubernetes?: KubernetesContext;
   directories: WorkspaceDirectory[];
   defaultDirectory: WorkspaceDirectory;
+  agent: ResolvedAgentProfile;
   summary: WorkspaceTargetSummary;
+}
+
+export interface ResolvedAgentProfile {
+  profile: AgentProfile;
+  legacy: boolean;
 }
 
 function describeError(error: unknown): string {
@@ -70,6 +80,28 @@ function contentRevision(content: string): string {
 
 function serializeManifest(manifest: WorkspaceManifest): string {
   return stringify(manifest, { lineWidth: 0 });
+}
+
+function assertManagedAgentResourcePaths(
+  manifest: WorkspaceManifest,
+  sourcePath: string,
+): void {
+  const workspaceRoot = dirname(sourcePath);
+  for (const profile of manifest.agentProfiles) {
+    const profileRoot = join(workspaceRoot, "resources", "agents", profile.id);
+    for (const file of profile.configuration.files) {
+      const source = resolveConfiguredPath(file.source, sourcePath);
+      const pathFromProfile = relative(profileRoot, source);
+      if (
+        pathFromProfile.split(/[\\/]/)[0] === ".." ||
+        isAbsolute(pathFromProfile)
+      ) {
+        throw new Error(
+          `Agent profile '${profile.id}' configuration source '${file.source}' is outside its managed resource directory`,
+        );
+      }
+    }
+  }
 }
 
 export function resolveConfiguredPath(
@@ -236,6 +268,20 @@ export class WorkspaceRegistry {
       throw new Error(`Unknown target '${targetId}' in workspace '${workspaceId}'`);
     }
     return this.resolve(workspace, target);
+  }
+
+  async resolveAgentConfigurationPath(
+    workspaceId: string,
+    configuredPath: string,
+  ): Promise<string> {
+    const workspace = await this.findWorkspace(workspaceId);
+    const declared = workspace.manifest.agentProfiles.some((profile) =>
+      profile.configuration.files.some(({ source }) => source === configuredPath),
+    );
+    if (!declared) {
+      throw new Error("The file is not declared by this workspace");
+    }
+    return resolveConfiguredPath(configuredPath, workspace.sourcePath);
   }
 
   private async findWorkspace(workspaceId: string): Promise<LoadedWorkspace> {
@@ -423,6 +469,59 @@ export class WorkspaceRegistry {
       }
       authentication.configFile = relative(destinationRoot, destination);
     }
+
+    for (const profile of manifest.agentProfiles) {
+      const managedNames = new Set<string>();
+      for (const file of profile.configuration.files) {
+        const source = sourceManifest
+          ? resolveConfiguredPath(file.source, sourceManifest)
+          : isAbsolute(file.source)
+            ? normalize(file.source)
+            : undefined;
+        if (!source) {
+          throw new Error(
+            `Agent profile '${profile.id}' configuration must be imported from an absolute path`,
+          );
+        }
+        const filename = basename(source);
+        if (managedNames.has(filename)) {
+          throw new Error(
+            `Agent profile '${profile.id}' has multiple configuration files named '${filename}'`,
+          );
+        }
+        managedNames.add(filename);
+        const destination = join(
+          destinationRoot,
+          "resources",
+          "agents",
+          profile.id,
+          filename,
+        );
+        if (normalize(source) !== normalize(destination)) {
+          await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+          const temporaryDestination = join(
+            dirname(destination),
+            `.${filename}.${randomUUID()}.tmp`,
+          );
+          try {
+            await copyFile(source, temporaryDestination);
+            await chmod(temporaryDestination, 0o600);
+            await rename(temporaryDestination, destination);
+          } finally {
+            await rm(temporaryDestination, { force: true });
+          }
+        } else {
+          const existing = await lstat(destination);
+          if (!existing.isFile() || existing.isSymbolicLink()) {
+            throw new Error(
+              `Agent profile '${profile.id}' managed configuration '${filename}' is not a regular file`,
+            );
+          }
+        }
+        await chmod(destination, 0o600);
+        file.source = relative(destinationRoot, destination).replaceAll("\\", "/");
+      }
+    }
     return manifest;
   }
 
@@ -450,6 +549,7 @@ export class WorkspaceRegistry {
       try {
         const document = parse(await readFile(sourcePath, "utf8"));
         const manifest = this.validateForEditor(document, sourcePath);
+        assertManagedAgentResourcePaths(manifest, sourcePath);
         if (workspaceIds.has(manifest.metadata.id)) {
           throw new Error(`Duplicate workspace id '${manifest.metadata.id}'`);
         }
@@ -510,6 +610,33 @@ export class WorkspaceRegistry {
       throw new Error(`Unknown default directory '${target.defaultDirectory}'`);
     }
 
+    const selectedAgentProfile =
+      target.agentProfile ?? workspace.manifest.defaultAgentProfile;
+    const configuredAgent = selectedAgentProfile
+      ? workspace.manifest.agentProfiles.find(({ id }) => id === selectedAgentProfile)
+      : undefined;
+    const agent: ResolvedAgentProfile | undefined = configuredAgent
+      ? { profile: configuredAgent, legacy: false }
+      : target.agentRuntime
+        ? {
+            profile: {
+              id: "legacy",
+              name: "Legacy target command",
+              adapter: "command",
+              runtime: {
+                command: target.agentRuntime.command,
+                args: target.agentRuntime.args,
+              },
+              configuration: { files: [] },
+              environment: {},
+            },
+            legacy: true,
+          }
+        : undefined;
+    if (!agent) {
+      throw new Error(`Target '${target.id}' does not resolve an agent profile`);
+    }
+
     const summary: WorkspaceTargetSummary = {
       id: target.id,
       name: target.name,
@@ -526,7 +653,13 @@ export class WorkspaceRegistry {
         : undefined,
       directories,
       defaultDirectory: defaultDirectory.path,
-      agentRuntime: target.agentRuntime,
+      agent: {
+        id: agent.profile.id,
+        name: agent.profile.name,
+        adapter: agent.profile.adapter,
+        command: agent.profile.runtime.command,
+        legacy: agent.legacy,
+      },
       isolationMode: target.isolation.mode,
       networkMode: target.isolation.network.mode,
     };
@@ -538,6 +671,7 @@ export class WorkspaceRegistry {
       kubernetes,
       directories,
       defaultDirectory,
+      agent,
       summary,
     };
   }

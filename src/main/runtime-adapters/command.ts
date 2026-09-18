@@ -1,9 +1,14 @@
-import type { CommandRuntimeDefinition } from "../../shared/contracts.js";
 import type {
   ProcessLaunchSpec,
   RuntimeAdapter,
   RuntimeLaunchContext,
 } from "./types.js";
+
+interface CommandLaunchDefinition {
+  adapter?: "command";
+  command: string;
+  args: string[];
+}
 
 function defaultShell(platform: NodeJS.Platform): string {
   if (platform === "win32") {
@@ -18,7 +23,11 @@ function defaultShell(platform: NodeJS.Platform): string {
 export class CommandRuntimeAdapter implements RuntimeAdapter {
   readonly id = "command";
 
-  constructor(private readonly definition: CommandRuntimeDefinition) {}
+  constructor(
+    private readonly definition: CommandLaunchDefinition,
+    private readonly environment: Record<string, string> = {},
+    private readonly exposeAgentState = false,
+  ) {}
 
   buildLaunchSpec(context: RuntimeLaunchContext): ProcessLaunchSpec {
     const command =
@@ -30,7 +39,13 @@ export class CommandRuntimeAdapter implements RuntimeAdapter {
       command,
       args: [...this.definition.args],
       cwd: context.cwd,
-      env: { ...context.environment },
+      env: {
+        ...this.environment,
+        ...context.environment,
+        ...(this.exposeAgentState
+          ? { OPSCAPSULE_AGENT_STATE: context.runtime.agentState }
+          : {}),
+      },
     };
   }
 }
