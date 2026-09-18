@@ -398,31 +398,31 @@ a {
   display: grid;
   grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 16px;
-  overflow: hidden;
+  overflow: visible;
   border: 1px solid #25343d;
   border-radius: 10px;
   background: rgb(16 25 32 / 82%);
 }
 
-.context-strip div {
+.context-strip > div {
   min-width: 0;
   padding: 10px 14px;
   border-right: 1px solid #25343d;
 }
 
-.context-strip div:last-child {
+.context-strip > div:last-child {
   border-right: none;
 }
 
-.context-strip span,
-.context-strip strong {
+.context-strip > div > span,
+.context-strip > div > strong {
   display: block;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.context-strip span {
+.context-strip > div > span {
   color: #637680;
   font-size: 9px;
   font-weight: 700;
@@ -430,12 +430,113 @@ a {
   text-transform: uppercase;
 }
 
-.context-strip strong {
+.context-strip > div > strong {
   margin-top: 4px;
   color: #b9cad1;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 11px;
   font-weight: 500;
+}
+
+.context-filesystem {
+  position: relative;
+  border-radius: 0 9px 9px 0;
+  cursor: help;
+  outline: none;
+}
+
+.context-filesystem > strong {
+  text-decoration: underline dotted #49606a;
+  text-underline-offset: 3px;
+}
+
+.context-filesystem:focus-visible {
+  box-shadow: inset 0 0 0 1px #5dcad0;
+}
+
+.context-tooltip {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 8px);
+  right: 0;
+  width: min(360px, calc(100vw - 40px));
+  padding: 12px;
+  visibility: hidden;
+  border: 1px solid #34505a;
+  border-radius: 9px;
+  opacity: 0;
+  color: #aebfc7;
+  background: #0d171e;
+  box-shadow: 0 14px 32px rgb(0 0 0 / 42%);
+  pointer-events: none;
+  transform: translateY(-4px);
+  transition:
+    opacity 120ms ease,
+    transform 120ms ease,
+    visibility 120ms ease;
+}
+
+.context-filesystem:hover .context-tooltip,
+.context-filesystem:focus .context-tooltip {
+  visibility: visible;
+  opacity: 1;
+  transform: translateY(0);
+}
+
+.context-tooltip-title {
+  display: block;
+  margin-bottom: 8px;
+  color: #6f858f;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.context-tooltip-root {
+  padding: 8px 0;
+  border-top: 1px solid #20313a;
+}
+
+.context-tooltip-root:first-of-type {
+  padding-top: 0;
+  border-top: none;
+}
+
+.context-tooltip-root:last-child {
+  padding-bottom: 0;
+}
+
+.context-tooltip-root > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.context-tooltip-root strong {
+  overflow: hidden;
+  color: #d6e4e8;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.context-tooltip-root span {
+  flex: 0 0 auto;
+  color: #67cbd2;
+  font-size: 9px;
+}
+
+.context-tooltip-root code {
+  display: block;
+  margin-top: 4px;
+  overflow: hidden;
+  color: #7f929b;
+  font-family: "SFMono-Regular", Consolas, monospace;
+  font-size: 9px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .capsule-view {

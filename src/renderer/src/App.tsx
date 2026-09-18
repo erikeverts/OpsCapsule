@@ -78,13 +78,35 @@ function ContextStrip({ target }: { target: WorkspaceTargetSummary }) {
           {target.agent.name} · {target.agent.adapter}
         </strong>
       </div>
-      <div>
+      <div
+        aria-describedby="filesystem-root-details"
+        className="context-filesystem"
+        tabIndex={0}
+      >
         <span>Filesystem</span>
         <strong>
           {target.isolationMode === "enforced"
             ? `${target.directories.length} roots enforced`
             : "Context only"}
         </strong>
+        <div
+          className="context-tooltip"
+          id="filesystem-root-details"
+          role="tooltip"
+        >
+          <span className="context-tooltip-title">Configured roots</span>
+          {target.directories.map((directory) => (
+            <div className="context-tooltip-root" key={directory.id}>
+              <div>
+                <strong>{directory.name}</strong>
+                <span>
+                  {directory.access === "read-write" ? "Read/write" : "Read only"}
+                </span>
+              </div>
+              <code>{directory.path}</code>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
