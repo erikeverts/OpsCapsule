@@ -1,20 +1,24 @@
+import { randomUUID } from "node:crypto";
 import {
   chmod,
   copyFile,
+  lstat,
   mkdtemp,
   mkdir,
-  readFile,
   readdir,
+  rename,
   rm,
   stat,
+  symlink,
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, normalize } from "node:path";
-import { parse, stringify } from "yaml";
+import { dirname, join } from "node:path";
+import { stringify } from "yaml";
 import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
+import { extractKubeconfigContext } from "./local-resources.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 import { resolveConfiguredPath } from "./workspace-registry.js";
 
@@ -26,6 +30,8 @@ const contextEnvironmentVariables = [
   "AWS_DEFAULT_PROFILE",
   "AWS_REGION",
   "AWS_DEFAULT_REGION",
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
   "KUBECONFIG",
 ] as const;
 
@@ -57,25 +63,6 @@ function generatedKubeconfig(kubernetes: KubernetesContext): object {
   };
 }
 
-async function stageReferencedFile(
-  value: unknown,
-  sourceDirectory: string,
-  assetDirectory: string,
-  filename: string,
-): Promise<unknown> {
-  if (typeof value !== "string") {
-    return value;
-  }
-  const sourcePath = isAbsolute(value)
-    ? value
-    : normalize(join(sourceDirectory, value));
-  const destination = join(assetDirectory, filename);
-  await mkdir(assetDirectory, { recursive: true, mode: 0o700 });
-  await copyFile(sourcePath, destination);
-  await chmod(destination, 0o600);
-  return destination;
-}
-
 async function extractedKubeconfig(
   kubernetes: KubernetesContext,
   manifestSourcePath: string,
@@ -88,70 +75,97 @@ async function extractedKubeconfig(
     kubernetes.source.path,
     manifestSourcePath,
   );
-  const sourceDirectory = dirname(sourcePath);
-  const source = parse(await readFile(sourcePath, "utf8")) as {
-    apiVersion?: string;
-    kind?: string;
-    clusters?: Array<{ name: string; cluster: Record<string, unknown> }>;
-    contexts?: Array<{ name: string; context: Record<string, unknown> }>;
-    users?: Array<{ name: string; user: Record<string, unknown> }>;
-  };
-  const contextEntry = source.contexts?.find(
-    ({ name }) => name === kubernetes.source.context,
-  );
-  if (!contextEntry) {
-    throw new Error(
-      `Kubernetes context '${kubernetes.source.context}' was not found in ${sourcePath}`,
-    );
-  }
-  const clusterName = String(contextEntry.context.cluster ?? "");
-  const userName = String(contextEntry.context.user ?? "");
-  const clusterEntry = source.clusters?.find(({ name }) => name === clusterName);
-  const userEntry = source.users?.find(({ name }) => name === userName);
-  if (!clusterEntry) {
-    throw new Error(`Cluster '${clusterName}' was not found in ${sourcePath}`);
-  }
-  if (!userEntry) {
-    throw new Error(`User '${userName}' was not found in ${sourcePath}`);
-  }
-
-  const cluster = { ...clusterEntry.cluster };
-  cluster["certificate-authority"] = await stageReferencedFile(
-    cluster["certificate-authority"],
-    sourceDirectory,
+  return extractKubeconfigContext({
+    sourcePath,
+    context: kubernetes.source.context,
+    namespace: kubernetes.namespace,
     assetDirectory,
-    "cluster-ca.pem",
-  );
-  const user = { ...userEntry.user };
-  for (const [key, filename] of [
-    ["client-certificate", "client-certificate.pem"],
-    ["client-key", "client-key.pem"],
-    ["tokenFile", "token"],
-  ] as const) {
-    user[key] = await stageReferencedFile(
-      user[key],
-      sourceDirectory,
-      assetDirectory,
-      filename,
-    );
-  }
+  });
+}
 
-  return {
-    apiVersion: source.apiVersion ?? "v1",
-    kind: source.kind ?? "Config",
-    clusters: [{ ...clusterEntry, cluster }],
-    contexts: [
-      {
-        ...contextEntry,
-        context: {
-          ...contextEntry.context,
-          ...(kubernetes.namespace ? { namespace: kubernetes.namespace } : {}),
-        },
-      },
-    ],
-    "current-context": contextEntry.name,
-    users: [{ ...userEntry, user }],
-  };
+async function writeIfMissing(path: string): Promise<void> {
+  try {
+    const existing = await lstat(path);
+    if (!existing.isFile() || existing.isSymbolicLink()) {
+      throw new Error(`Refusing unsafe target state path: ${path}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    await writeFile(path, "", { encoding: "utf8", flag: "wx", mode: 0o600 });
+  }
+  await chmod(path, 0o600);
+}
+
+async function assertStateDirectory(path: string): Promise<void> {
+  try {
+    const existing = await lstat(path);
+    if (!existing.isDirectory() || existing.isSymbolicLink()) {
+      throw new Error(`Refusing unsafe target state directory: ${path}`);
+    }
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
+      throw error;
+    }
+    await mkdir(path, { recursive: true, mode: 0o700 });
+  }
+  await chmod(path, 0o700);
+}
+
+async function stageAwsConfig(
+  source: string | undefined,
+  destination: string,
+): Promise<void> {
+  const temporary = join(dirname(destination), `.config.${randomUUID()}.tmp`);
+  try {
+    if (source) {
+      await copyFile(source, temporary);
+      await chmod(temporary, 0o600);
+    } else {
+      await writeFile(temporary, "", {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+    }
+    await rename(temporary, destination);
+  } finally {
+    await rm(temporary, { force: true });
+  }
+}
+
+async function prepareCloudState(
+  home: string,
+  targetState: string,
+  resolvedTarget: ResolvedWorkspaceTarget,
+): Promise<void> {
+  if (resolvedTarget.cloud?.provider !== "aws") {
+    return;
+  }
+  const awsState = join(targetState, ".aws");
+  await assertStateDirectory(awsState);
+  const authentication = (
+    resolvedTarget.cloud.config as {
+      authentication?: { configFile?: string };
+    }
+  ).authentication;
+  const destination = join(awsState, "config");
+  await stageAwsConfig(
+    authentication?.configFile
+      ? resolveConfiguredPath(
+        authentication.configFile,
+        resolvedTarget.workspace.sourcePath,
+      )
+      : undefined,
+    destination,
+  );
+  await writeIfMissing(join(awsState, "credentials"));
+  await symlink(
+    awsState,
+    join(home, ".aws"),
+    process.platform === "win32" ? "junction" : "dir",
+  );
 }
 
 async function writeKubeconfig(
@@ -215,11 +229,22 @@ export async function createWorkspaceRuntime(
   );
   const kubeconfig = join(root, "kubeconfig.yaml");
   const sandboxConfig = join(root, "sandbox.json");
+  const targetState = join(
+    baseDirectory,
+    "state",
+    "workspaces",
+    resolvedTarget.workspace.manifest.metadata.id,
+    "targets",
+    resolvedTarget.target.id,
+  );
 
   await Promise.all([
     mkdir(home, { recursive: true, mode: 0o700 }),
     mkdir(join(home, ".config"), { recursive: true, mode: 0o700 }),
+    mkdir(dirname(targetState), { recursive: true, mode: 0o700 }),
   ]);
+  await assertStateDirectory(targetState);
+  await prepareCloudState(home, targetState, resolvedTarget);
   await Promise.all([
     writeKubeconfig(kubeconfig, resolvedTarget),
     writeShellConfiguration(
@@ -229,7 +254,7 @@ export async function createWorkspaceRuntime(
     ),
   ]);
 
-  return { root, home, temp, kubeconfig, sandboxConfig };
+  return { root, home, temp, kubeconfig, sandboxConfig, targetState };
 }
 
 export async function cleanupWorkspaceRuntime(runtime: RuntimePaths): Promise<void> {
@@ -279,7 +304,9 @@ export function buildWorkspaceEnvironment(
   }
 
   const cloudEnvironment = resolvedTarget.cloud
-    ? cloudAdapters.environment(resolvedTarget.cloud)
+    ? cloudAdapters.environment(resolvedTarget.cloud, {
+        targetState: runtime.targetState,
+      })
     : {};
 
   return {

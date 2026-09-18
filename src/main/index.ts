@@ -1,11 +1,16 @@
 import { join } from "node:path";
-import { app, BrowserWindow, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
+  choosePathInput,
+  createWorkspaceInput,
+  inspectDirectoryInput,
+  saveWorkspaceInput,
   startWorkspaceInput,
   stopWorkspaceInput,
   terminalAttachmentInput,
   terminalResizeInput,
   terminalWriteInput,
+  workspaceDocumentInput,
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
 import { prepareIsolation } from "./isolation/prepare.js";
@@ -16,6 +21,10 @@ import {
 } from "./runtime-directory.js";
 import { TerminalManager } from "./terminal-manager.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
+import {
+  discoverLocalResources,
+  inspectDirectory,
+} from "./local-resources.js";
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
@@ -28,6 +37,40 @@ const terminalManager = new TerminalManager({
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listWorkspaces, () => workspaceRegistry.catalog());
+
+  ipcMain.handle(IPC.getWorkspace, (_event, input: unknown) => {
+    const { workspaceId } = workspaceDocumentInput.parse(input);
+    return workspaceRegistry.document(workspaceId);
+  });
+
+  ipcMain.handle(IPC.createWorkspace, (_event, input: unknown) => {
+    const { manifest } = createWorkspaceInput.parse(input);
+    return workspaceRegistry.create(manifest);
+  });
+
+  ipcMain.handle(IPC.saveWorkspace, (_event, input: unknown) => {
+    const { workspaceId, revision, manifest } = saveWorkspaceInput.parse(input);
+    return workspaceRegistry.save(workspaceId, revision, manifest);
+  });
+
+  ipcMain.handle(IPC.choosePath, async (_event, input: unknown) => {
+    const { kind } = choosePathInput.parse(input);
+    const options: Electron.OpenDialogOptions = {
+      properties: [kind === "directory" ? "openDirectory" : "openFile"],
+      ...(process.platform === "darwin" ? { showHiddenFiles: true } : {}),
+    };
+    const result = mainWindow
+      ? await dialog.showOpenDialog(mainWindow, options)
+      : await dialog.showOpenDialog(options);
+    return result.canceled ? null : (result.filePaths[0] ?? null);
+  });
+
+  ipcMain.handle(IPC.inspectDirectory, (_event, input: unknown) => {
+    const { path } = inspectDirectoryInput.parse(input);
+    return inspectDirectory(path);
+  });
+
+  ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
 
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);

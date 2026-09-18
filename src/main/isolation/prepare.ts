@@ -26,7 +26,12 @@ export async function prepareIsolation(
   if (resolvedTarget.target.isolation.mode === "context-only") {
     return new ContextOnlyIsolation(
       readOnlyPaths,
-      [...readWritePaths, runtime.root, runtime.temp],
+      [
+        ...readWritePaths,
+        runtime.root,
+        runtime.temp,
+        runtime.targetState,
+      ],
       resolvedTarget.target.isolation.network.mode,
     );
   }
@@ -35,8 +40,7 @@ export async function prepareIsolation(
     applicationRoot,
     runtime,
     readOnlyPaths,
-    readWritePaths,
+    readWritePaths: [...readWritePaths, runtime.targetState],
     network: resolvedTarget.target.isolation.network,
   }).prepare();
 }
-

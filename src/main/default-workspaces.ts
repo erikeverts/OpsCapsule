@@ -172,7 +172,7 @@ export async function seedDefaultWorkspaces(
 ): Promise<void> {
   await mkdir(configDirectory, { recursive: true });
   const existingFiles = await readdir(configDirectory);
-  if (existingFiles.some((file) => /\.ya?ml$/i.test(file))) {
+  if (existingFiles.length > 0) {
     return;
   }
 
@@ -201,21 +201,27 @@ export async function seedDefaultWorkspaces(
   );
 
   const manifests = [
-    ["atlas.yaml", atlasWorkspace(demoRoot)],
-    ["borealis.yaml", borealisWorkspace(demoRoot)],
+    ["atlas", atlasWorkspace(demoRoot)],
+    ["borealis", borealisWorkspace(demoRoot)],
   ] as const;
 
   await Promise.all(
-    manifests.map(([filename, manifest]) =>
-      writeFile(join(configDirectory, filename), stringify(manifest), {
-        encoding: "utf8",
-        flag: "wx",
-        mode: 0o600,
-      }).catch((error: NodeJS.ErrnoException) => {
+    manifests.map(async ([workspaceId, manifest]) => {
+      const workspaceDirectory = join(configDirectory, workspaceId);
+      await mkdir(workspaceDirectory, { recursive: true, mode: 0o700 });
+      await writeFile(
+        join(workspaceDirectory, "workspace.yaml"),
+        stringify(manifest),
+        {
+          encoding: "utf8",
+          flag: "wx",
+          mode: 0o600,
+        },
+      ).catch((error: NodeJS.ErrnoException) => {
         if (error.code !== "EEXIST") {
           throw error;
         }
-      }),
-    ),
+      });
+    }),
   );
 }

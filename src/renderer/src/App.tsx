@@ -6,6 +6,11 @@ import type {
   WorkspaceTargetSummary,
 } from "../../shared/contracts";
 import { TerminalPane } from "./components/TerminalPane";
+import { WorkspaceEditor } from "./components/WorkspaceEditor";
+
+type EditorRoute =
+  | { mode: "create" }
+  | { mode: "edit"; workspaceId: string };
 
 function sessionKey(workspaceId: string, targetId: string): string {
   return `${workspaceId}/${targetId}`;
@@ -82,11 +87,13 @@ function WorkspaceNavigation({
   workspaces,
   selectedId,
   sessions,
+  disabled,
   onSelect,
 }: {
   workspaces: WorkspaceCatalogEntry[];
   selectedId: string;
   sessions: Record<string, WorkspaceSession>;
+  disabled: boolean;
   onSelect: (workspace: WorkspaceCatalogEntry) => void;
 }) {
   return (
@@ -98,6 +105,7 @@ function WorkspaceNavigation({
         return (
           <button
             className={workspace.id === selectedId ? "selected" : ""}
+            disabled={disabled}
             key={workspace.id}
             onClick={() => onSelect(workspace)}
             type="button"
@@ -124,6 +132,7 @@ export function App() {
   const [sessions, setSessions] = useState<Record<string, WorkspaceSession>>({});
   const [startingKey, setStartingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [editor, setEditor] = useState<EditorRoute | null>(null);
 
   useEffect(() => {
     window.opsCapsule
@@ -158,6 +167,18 @@ export function App() {
   function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
     setSelectedWorkspaceId(workspace.id);
     setSelectedTargetId(workspace.targets[0]?.id ?? "");
+    setError(null);
+  }
+
+  async function workspaceSaved(workspaceId: string): Promise<void> {
+    const loadedCatalog = await window.opsCapsule.listWorkspaces();
+    setCatalog(loadedCatalog);
+    const workspace = loadedCatalog.workspaces.find(
+      ({ id }) => id === workspaceId,
+    );
+    setSelectedWorkspaceId(workspaceId);
+    setSelectedTargetId(workspace?.targets[0]?.id ?? "");
+    setEditor(null);
     setError(null);
   }
 
@@ -198,9 +219,16 @@ export function App() {
   }
 
   const production = selectedTarget?.risk === "production";
+  const selectedWorkspaceRunning = selectedWorkspace
+    ? Object.values(sessions).some(
+        (session) => session.workspace.id === selectedWorkspace.id,
+      )
+    : false;
 
   return (
-    <main className={`app-shell ${production ? "production-active" : ""}`}>
+    <main
+      className={`app-shell ${production && !editor ? "production-active" : ""}`}
+    >
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">OC</div>
@@ -215,19 +243,33 @@ export function App() {
           workspaces={catalog?.workspaces ?? []}
           selectedId={selectedWorkspaceId}
           sessions={sessions}
+          disabled={editor !== null}
           onSelect={selectWorkspace}
         />
+
+        <button
+          className="sidebar-create-button"
+          disabled={editor !== null}
+          onClick={() => setEditor({ mode: "create" })}
+          type="button"
+        >
+          <span>+</span> New workspace
+        </button>
 
         <div className="sidebar-note">
           <span className="shield">◇</span>
           <div>
             <strong>
-              {selectedTarget?.isolationMode === "enforced"
+              {editor
+                ? "Editing configuration"
+                : selectedTarget?.isolationMode === "enforced"
                 ? "Filesystem enforced"
                 : "Context isolation only"}
             </strong>
             <span>
-              {selectedTarget?.isolationMode === "enforced"
+              {editor
+                ? "Changes are validated and written back to the workspace YAML manifest."
+                : selectedTarget?.isolationMode === "enforced"
                 ? "Configured roots and capsule-private storage are enforced by the OS."
                 : "Filesystem access is not restricted for this target."}
             </span>
@@ -235,8 +277,15 @@ export function App() {
         </div>
       </aside>
 
-      <div className="workspace-area">
-        {selectedWorkspace && selectedTarget ? (
+      <div className={`workspace-area ${editor ? "studio-active" : ""}`}>
+        {editor ? (
+          <WorkspaceEditor
+            mode={editor.mode}
+            onCancel={() => setEditor(null)}
+            onSaved={workspaceSaved}
+            workspaceId={editor.mode === "edit" ? editor.workspaceId : undefined}
+          />
+        ) : selectedWorkspace && selectedTarget ? (
           <>
             <header className="workspace-header">
               <div>
@@ -252,6 +301,24 @@ export function App() {
                 </h1>
               </div>
               <div className="header-actions">
+                <button
+                  className="secondary-button"
+                  disabled={selectedWorkspaceRunning}
+                  onClick={() =>
+                    setEditor({
+                      mode: "edit",
+                      workspaceId: selectedWorkspace.id,
+                    })
+                  }
+                  title={
+                    selectedWorkspaceRunning
+                      ? "Stop this workspace before editing it"
+                      : undefined
+                  }
+                  type="button"
+                >
+                  Edit workspace
+                </button>
                 {selectedSession ? (
                   <button
                     className="secondary-button"

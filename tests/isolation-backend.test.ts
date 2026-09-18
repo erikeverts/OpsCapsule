@@ -130,7 +130,7 @@ describe.skipIf(!macOsSandboxAvailable)(
         const home = join(root, "home");
         const sessionTemp = join(root, "tmp");
         await Promise.all(
-          [allowed, denied, home, sessionTemp].map((path) =>
+          [allowed, denied, home, sessionTemp, join(base, "target-state")].map((path) =>
             mkdir(path, { recursive: true }),
           ),
         );
@@ -146,6 +146,7 @@ describe.skipIf(!macOsSandboxAvailable)(
           temp: sessionTemp,
           kubeconfig: join(root, "kubeconfig.yaml"),
           sandboxConfig: join(root, "sandbox.json"),
+          targetState: join(base, "target-state"),
         };
         const isolation = await new SandboxRuntimeIsolationBackend({
           applicationRoot: process.cwd(),
@@ -206,10 +207,12 @@ describe.skipIf(process.platform !== "darwin" || macOsSandboxAvailable)(
         temp: join(base, "tmp"),
         kubeconfig: join(base, "kubeconfig.yaml"),
         sandboxConfig: join(base, "sandbox.json"),
+        targetState: join(base, "target-state"),
       };
       await Promise.all([
         mkdir(runtime.home, { recursive: true }),
         mkdir(runtime.temp, { recursive: true }),
+        mkdir(runtime.targetState, { recursive: true }),
       ]);
 
       await expect(

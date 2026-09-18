@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
 export type DirectoryAccess = "read-only" | "read-write";
@@ -66,12 +67,50 @@ export interface WorkspaceCatalog {
   errors: WorkspaceLoadError[];
 }
 
+export interface WorkspaceDocument {
+  manifest: WorkspaceManifest;
+  sourcePath: string;
+  revision: string;
+  yaml: string;
+}
+
+export interface VersionControlSummary {
+  type: "git" | "subversion" | "cvs" | "mercurial";
+  root: string;
+}
+
+export interface DirectoryInspection {
+  path: string;
+  versionControl?: VersionControlSummary;
+}
+
+export interface AwsProfileOption {
+  name: string;
+  configFile: string;
+  region?: string;
+  accountId?: string;
+}
+
+export interface KubernetesContextOption {
+  name: string;
+  path: string;
+  cluster?: string;
+  namespace?: string;
+  current: boolean;
+}
+
+export interface LocalResourceOptions {
+  awsProfiles: AwsProfileOption[];
+  kubernetesContexts: KubernetesContextOption[];
+}
+
 export interface RuntimePaths {
   root: string;
   home: string;
   temp: string;
   kubeconfig: string;
   sandboxConfig: string;
+  targetState: string;
 }
 
 export interface EffectiveIsolation {
@@ -114,6 +153,28 @@ export const startWorkspaceInput = z.object({
   targetId: z.string().min(1),
 });
 
+export const workspaceDocumentInput = z.object({
+  workspaceId: z.string().min(1),
+});
+
+export const createWorkspaceInput = z.object({
+  manifest: z.unknown(),
+});
+
+export const saveWorkspaceInput = z.object({
+  workspaceId: z.string().min(1),
+  revision: z.string().min(1),
+  manifest: z.unknown(),
+});
+
+export const choosePathInput = z.object({
+  kind: z.enum(["directory", "file"]),
+});
+
+export const inspectDirectoryInput = z.object({
+  path: z.string().min(1),
+});
+
 export const terminalWriteInput = z.object({
   sessionId: z.string().min(1),
   terminalId: z.string().min(1),
@@ -138,6 +199,16 @@ export const stopWorkspaceInput = z.object({
 
 export interface OpsCapsuleApi {
   listWorkspaces(): Promise<WorkspaceCatalog>;
+  getWorkspace(workspaceId: string): Promise<WorkspaceDocument>;
+  createWorkspace(manifest: WorkspaceManifest): Promise<WorkspaceDocument>;
+  saveWorkspace(
+    workspaceId: string,
+    revision: string,
+    manifest: WorkspaceManifest,
+  ): Promise<WorkspaceDocument>;
+  choosePath(kind: "directory" | "file"): Promise<string | null>;
+  inspectDirectory(path: string): Promise<DirectoryInspection>;
+  discoverLocalResources(): Promise<LocalResourceOptions>;
   startWorkspace(
     workspaceId: string,
     targetId: string,

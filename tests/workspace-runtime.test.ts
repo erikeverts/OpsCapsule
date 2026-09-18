@@ -184,4 +184,61 @@ describe("workspace runtime isolation", () => {
 
     await cleanupWorkspaceRuntime(runtime);
   });
+
+  it("stages imported AWS configuration into persistent target state", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-aws-"));
+    temporaryDirectories.push(baseDirectory);
+    const sourceConfig = join(baseDirectory, "aws-config");
+    await writeFile(
+      sourceConfig,
+      [
+        "[profile development]",
+        "sso_session = example",
+        "sso_account_id = 111122223333",
+        "region = eu-west-1",
+        "",
+        "[sso-session example]",
+        "sso_start_url = https://example.awsapps.com/start",
+        "sso_region = eu-west-1",
+        "",
+      ].join("\n"),
+    );
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = { id: "imported", name: "Imported" };
+    manifest.cloudConnections = manifest.cloudConnections.slice(0, 1);
+    manifest.kubernetesContexts = manifest.kubernetesContexts.slice(0, 1);
+    manifest.targets = manifest.targets.slice(0, 1);
+    const authentication = manifest.cloudConnections[0]!.config.authentication as {
+      type: "profile";
+      profile: string;
+      configFile?: string;
+    };
+    authentication.profile = "development";
+    authentication.configFile = sourceConfig;
+    await registry.create(manifest);
+
+    const target = await registry.resolveTarget("imported", "development");
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "aws-session",
+      target,
+    );
+    const environment = buildWorkspaceEnvironment(runtime, target);
+    const stagedConfig = join(runtime.targetState, ".aws", "config");
+
+    expect(environment.AWS_CONFIG_FILE).toBe(stagedConfig);
+    expect(environment.AWS_SHARED_CREDENTIALS_FILE).toBe(
+      join(runtime.targetState, ".aws", "credentials"),
+    );
+    expect(await readFile(stagedConfig, "utf8")).toContain(
+      "[profile development]",
+    );
+    await cleanupWorkspaceRuntime(runtime);
+    expect(await readFile(stagedConfig, "utf8")).toContain(
+      "[sso-session example]",
+    );
+  });
 });

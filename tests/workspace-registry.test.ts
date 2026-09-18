@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { stringify } from "yaml";
 import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
 
 const temporaryDirectories: string[] = [];
@@ -70,5 +71,91 @@ describe("workspace registry", () => {
     expect(catalog.workspaces).toHaveLength(0);
     expect(catalog.errors).toHaveLength(1);
   });
-});
 
+  it("creates and atomically updates a workspace document", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const atlas = await registry.document("atlas");
+    const manifest = structuredClone(atlas.manifest);
+    manifest.metadata.id = "customer-platform";
+    manifest.metadata.name = "Customer Platform";
+    manifest.targets = manifest.targets.slice(0, 1);
+
+    const created = await registry.create(manifest);
+    expect(created.sourcePath).toBe(
+      join(
+        registry.configDirectory,
+        "customer-platform",
+        "workspace.yaml",
+      ),
+    );
+    expect(created.revision).toHaveLength(64);
+
+    created.manifest.metadata.description = "Edited in Workspace Studio";
+    const saved = await registry.save(
+      "customer-platform",
+      created.revision,
+      created.manifest,
+    );
+    expect(saved.revision).not.toBe(created.revision);
+    expect(
+      (await registry.document("customer-platform")).manifest.metadata
+        .description,
+    ).toBe("Edited in Workspace Studio");
+  });
+
+  it("refuses to overwrite a workspace changed outside the editor", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    await writeFile(
+      document.sourcePath,
+      `${document.yaml}\n# changed outside OpsCapsule\n`,
+      "utf8",
+    );
+
+    await expect(
+      registry.save("atlas", document.revision, document.manifest),
+    ).rejects.toThrow("changed on disk");
+  });
+
+  it("keeps an existing workspace id stable", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    document.manifest.metadata.id = "renamed-atlas";
+
+    await expect(
+      registry.save("atlas", document.revision, document.manifest),
+    ).rejects.toThrow("cannot be changed");
+  });
+
+  it("migrates a legacy flat manifest without changing relative directory meaning", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const project = join(root, "project");
+    await mkdir(project, { recursive: true });
+    const atlas = await registry.document("atlas");
+    const manifest = structuredClone(atlas.manifest);
+    manifest.metadata = { id: "legacy", name: "Legacy" };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.directories[0]!.path = "../../project";
+    const legacyPath = join(registry.configDirectory, "legacy.yaml");
+    await writeFile(legacyPath, stringify(manifest));
+
+    const before = await registry.resolveTarget("legacy", "development");
+    const document = await registry.document("legacy");
+    const saved = await registry.save("legacy", document.revision, document.manifest);
+    const after = await registry.resolveTarget("legacy", "development");
+
+    expect(before.defaultDirectory.path).toBe(project);
+    expect(after.defaultDirectory.path).toBe(project);
+    expect(saved.sourcePath).toBe(
+      join(registry.configDirectory, "legacy", "workspace.yaml"),
+    );
+  });
+});
