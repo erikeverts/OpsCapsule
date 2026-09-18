@@ -1,6 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import {
-  link,
+  mkdir,
   readFile,
   readdir,
   rename,
@@ -14,6 +14,7 @@ import {
   isAbsolute,
   join,
   normalize,
+  relative,
   resolve,
 } from "node:path";
 import { parse, stringify } from "yaml";
@@ -34,6 +35,10 @@ import {
 } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { seedDefaultWorkspaces } from "./default-workspaces.js";
+import {
+  extractAwsProfile,
+  writeExtractedKubeconfig,
+} from "./local-resources.js";
 
 export interface LoadedWorkspace {
   manifest: WorkspaceManifest;
@@ -131,30 +136,41 @@ export class WorkspaceRegistry {
       throw new Error(`Workspace '${manifest.metadata.id}' already exists`);
     }
 
-    const sourcePath = join(
+    const workspaceRoot = join(this.configDirectory, manifest.metadata.id);
+    const sourcePath = join(workspaceRoot, "workspace.yaml");
+    const temporaryRoot = join(
       this.configDirectory,
-      `${manifest.metadata.id}.yaml`,
+      `.${manifest.metadata.id}.${randomUUID()}.tmp`,
     );
-    this.validateForEditor(manifest, sourcePath);
-    const yaml = serializeManifest(manifest);
-    const temporaryPath = await this.writeTemporaryManifest(sourcePath, yaml);
+    await mkdir(temporaryRoot, { mode: 0o700 });
     try {
-      await link(temporaryPath, sourcePath);
+      const materialized = await this.materializeResources(
+        manifest,
+        undefined,
+        temporaryRoot,
+      );
+      this.validateForEditor(materialized, sourcePath);
+      const yaml = serializeManifest(materialized);
+      await writeFile(join(temporaryRoot, "workspace.yaml"), yaml, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      await rename(temporaryRoot, workspaceRoot);
+      return {
+        manifest: materialized,
+        sourcePath,
+        revision: contentRevision(yaml),
+        yaml,
+      };
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code === "EEXIST") {
-        throw new Error(`Manifest file '${basename(sourcePath)}' already exists`);
+        throw new Error(`Workspace directory '${manifest.metadata.id}' already exists`);
       }
       throw error;
     } finally {
-      await rm(temporaryPath, { force: true });
+      await rm(temporaryRoot, { recursive: true, force: true });
     }
-
-    return {
-      manifest,
-      sourcePath,
-      revision: contentRevision(yaml),
-      yaml,
-    };
   }
 
   async save(
@@ -174,11 +190,22 @@ export class WorkspaceRegistry {
     if (manifest.metadata.id !== workspaceId) {
       throw new Error("A workspace id cannot be changed after creation");
     }
-    const yaml = serializeManifest(manifest);
-    const temporaryPath = await this.writeTemporaryManifest(
-      workspace.sourcePath,
-      yaml,
+    const managedSourcePath = join(
+      this.configDirectory,
+      workspaceId,
+      "workspace.yaml",
     );
+    if (workspace.sourcePath !== managedSourcePath) {
+      return this.migrateLegacyWorkspace(workspace, manifest, managedSourcePath);
+    }
+
+    const materialized = await this.materializeResources(
+      manifest,
+      workspace.sourcePath,
+      dirname(workspace.sourcePath),
+    );
+    const yaml = serializeManifest(materialized);
+    const temporaryPath = await this.writeTemporaryManifest(workspace.sourcePath, yaml);
     try {
       await rename(temporaryPath, workspace.sourcePath);
     } finally {
@@ -186,7 +213,7 @@ export class WorkspaceRegistry {
     }
 
     return {
-      manifest,
+      manifest: materialized,
       sourcePath: workspace.sourcePath,
       revision: contentRevision(yaml),
       yaml,
@@ -250,19 +277,176 @@ export class WorkspaceRegistry {
     return temporaryPath;
   }
 
+  private async migrateLegacyWorkspace(
+    workspace: LoadedWorkspace,
+    manifest: WorkspaceManifest,
+    destination: string,
+  ): Promise<WorkspaceDocument> {
+    const destinationRoot = dirname(destination);
+    const rebasedManifest = structuredClone(manifest);
+    for (const directory of rebasedManifest.directories) {
+      if (
+        !isAbsolute(directory.path) &&
+        directory.path !== "~" &&
+        !directory.path.startsWith("~/")
+      ) {
+        directory.path = relative(
+          destinationRoot,
+          resolveConfiguredPath(directory.path, workspace.sourcePath),
+        );
+      }
+    }
+    const temporaryRoot = join(
+      this.configDirectory,
+      `.${manifest.metadata.id}.${randomUUID()}.tmp`,
+    );
+    let installed = false;
+    await mkdir(temporaryRoot, { mode: 0o700 });
+    try {
+      const materialized = await this.materializeResources(
+        rebasedManifest,
+        workspace.sourcePath,
+        temporaryRoot,
+      );
+      const yaml = serializeManifest(materialized);
+      await writeFile(join(temporaryRoot, "workspace.yaml"), yaml, {
+        encoding: "utf8",
+        flag: "wx",
+        mode: 0o600,
+      });
+      await rename(temporaryRoot, destinationRoot);
+      installed = true;
+      try {
+        await rm(workspace.sourcePath);
+      } catch (error) {
+        await rm(destinationRoot, { recursive: true, force: true });
+        installed = false;
+        throw error;
+      }
+      return {
+        manifest: materialized,
+        sourcePath: destination,
+        revision: contentRevision(yaml),
+        yaml,
+      };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+        throw new Error(`Workspace directory '${manifest.metadata.id}' already exists`);
+      }
+      throw error;
+    } finally {
+      if (!installed) {
+        await rm(temporaryRoot, { recursive: true, force: true });
+      }
+    }
+  }
+
+  private async materializeResources(
+    input: WorkspaceManifest,
+    sourceManifest: string | undefined,
+    destinationRoot: string,
+  ): Promise<WorkspaceManifest> {
+    const manifest = structuredClone(input);
+    for (const kubernetes of manifest.kubernetesContexts) {
+      if (kubernetes.source.type !== "kubeconfig") {
+        continue;
+      }
+      const destination = join(
+        destinationRoot,
+        "resources",
+        "kubernetes",
+        kubernetes.id,
+        "config.yaml",
+      );
+      const source = sourceManifest
+        ? resolveConfiguredPath(kubernetes.source.path, sourceManifest)
+        : isAbsolute(kubernetes.source.path)
+          ? normalize(kubernetes.source.path)
+          : undefined;
+      if (!source) {
+        throw new Error(
+          `Kubernetes context '${kubernetes.id}' must be imported from an absolute kubeconfig path`,
+        );
+      }
+      if (normalize(source) !== normalize(destination)) {
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+        await writeExtractedKubeconfig({
+          sourcePath: source,
+          context: kubernetes.source.context,
+          namespace: kubernetes.namespace,
+          destination,
+        });
+      }
+      kubernetes.source.path = relative(destinationRoot, destination);
+    }
+
+    for (const connection of manifest.cloudConnections) {
+      if (connection.provider !== "aws") {
+        continue;
+      }
+      const authentication = (
+        connection.config as {
+          authentication?: {
+            type?: string;
+            profile?: string;
+            configFile?: string;
+          };
+        }
+      ).authentication;
+      if (!authentication?.configFile || !authentication.profile) {
+        continue;
+      }
+      const destination = join(
+        destinationRoot,
+        "resources",
+        "cloud",
+        connection.id,
+        "config",
+      );
+      const source = sourceManifest
+        ? resolveConfiguredPath(authentication.configFile, sourceManifest)
+        : isAbsolute(authentication.configFile)
+          ? normalize(authentication.configFile)
+          : undefined;
+      if (!source) {
+        throw new Error(
+          `AWS connection '${connection.id}' must be imported from an absolute config path`,
+        );
+      }
+      if (normalize(source) !== normalize(destination)) {
+        await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+        await writeFile(
+          destination,
+          await extractAwsProfile(source, authentication.profile),
+          { encoding: "utf8", mode: 0o600 },
+        );
+      }
+      authentication.configFile = relative(destinationRoot, destination);
+    }
+    return manifest;
+  }
+
   private async loadAll(): Promise<{
     workspaces: LoadedWorkspace[];
     errors: Array<{ sourcePath: string; message: string }>;
   }> {
-    const files = (await readdir(this.configDirectory))
-      .filter((file) => /\.ya?ml$/i.test(file))
+    const entries = await readdir(this.configDirectory, { withFileTypes: true });
+    const files = entries
+      .flatMap((entry) => {
+        if (entry.isFile() && /\.ya?ml$/i.test(entry.name)) {
+          return [join(this.configDirectory, entry.name)];
+        }
+        if (entry.isDirectory() && !entry.name.startsWith(".")) {
+          return [join(this.configDirectory, entry.name, "workspace.yaml")];
+        }
+        return [];
+      })
       .sort();
     const workspaces: LoadedWorkspace[] = [];
     const errors: Array<{ sourcePath: string; message: string }> = [];
     const workspaceIds = new Set<string>();
 
-    for (const file of files) {
-      const sourcePath = join(this.configDirectory, file);
+    for (const sourcePath of files) {
       try {
         const document = parse(await readFile(sourcePath, "utf8"));
         const manifest = this.validateForEditor(document, sourcePath);

@@ -27,10 +27,9 @@ edit from being overwritten silently. Replacements are written to a mode-0600
 temporary file in the same directory and atomically renamed into place. New files
 are created without overwriting an existing path.
 
-Workspace ids are immutable after creation. Credentials are not part of the
-editor model: cloud connections contain profile references and expected identity,
-while Kubernetes connections contain kubeconfig references or generated public
-connection data.
+Workspace ids are generated from names and immutable after creation. Credentials
+are not part of the editor model. ADR 0004 extends this decision with discovered
+profiles/contexts, managed resource copies, and target-specific mutable state.
 
 Running workspaces cannot be edited in this slice. This avoids removing or
 renaming targets while their terminal sessions are active; saved changes take
@@ -44,5 +43,5 @@ effect on the next launch.
 - The renderer cannot choose arbitrary output paths or bypass validation.
 - Comments and hand formatting are normalized when a manifest is saved through
   Workspace Studio. Comment-preserving YAML edits may be considered later.
-- Provider discovery, connection tests, duplication, import/export, archival,
-  and secret brokering remain future slices.
+- Connection tests, duplication, export, archival, and secret brokering remain
+  future slices.

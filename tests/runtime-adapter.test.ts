@@ -7,6 +7,7 @@ const runtime = {
   temp: "/tmp/capsule/tmp",
   kubeconfig: "/tmp/capsule/kubeconfig",
   sandboxConfig: "/tmp/capsule/sandbox.json",
+  targetState: "/tmp/capsule-state",
 };
 
 describe("command runtime adapter", () => {
@@ -45,4 +46,3 @@ describe("command runtime adapter", () => {
     expect(launchSpec.args).toEqual(["--model", "provider/model"]);
   });
 });
-

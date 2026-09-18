@@ -2,6 +2,7 @@ import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
+import { stringify } from "yaml";
 import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
 
 const temporaryDirectories: string[] = [];
@@ -83,7 +84,11 @@ describe("workspace registry", () => {
 
     const created = await registry.create(manifest);
     expect(created.sourcePath).toBe(
-      join(registry.configDirectory, "customer-platform.yaml"),
+      join(
+        registry.configDirectory,
+        "customer-platform",
+        "workspace.yaml",
+      ),
     );
     expect(created.revision).toHaveLength(64);
 
@@ -126,5 +131,31 @@ describe("workspace registry", () => {
     await expect(
       registry.save("atlas", document.revision, document.manifest),
     ).rejects.toThrow("cannot be changed");
+  });
+
+  it("migrates a legacy flat manifest without changing relative directory meaning", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const project = join(root, "project");
+    await mkdir(project, { recursive: true });
+    const atlas = await registry.document("atlas");
+    const manifest = structuredClone(atlas.manifest);
+    manifest.metadata = { id: "legacy", name: "Legacy" };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.directories[0]!.path = "../../project";
+    const legacyPath = join(registry.configDirectory, "legacy.yaml");
+    await writeFile(legacyPath, stringify(manifest));
+
+    const before = await registry.resolveTarget("legacy", "development");
+    const document = await registry.document("legacy");
+    const saved = await registry.save("legacy", document.revision, document.manifest);
+    const after = await registry.resolveTarget("legacy", "development");
+
+    expect(before.defaultDirectory.path).toBe(project);
+    expect(after.defaultDirectory.path).toBe(project);
+    expect(saved.sourcePath).toBe(
+      join(registry.configDirectory, "legacy", "workspace.yaml"),
+    );
   });
 });

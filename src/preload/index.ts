@@ -19,6 +19,10 @@ const api: OpsCapsuleApi = {
       manifest,
     }),
   choosePath: (kind) => ipcRenderer.invoke(IPC.choosePath, { kind }),
+  inspectDirectory: (path) =>
+    ipcRenderer.invoke(IPC.inspectDirectory, { path }),
+  discoverLocalResources: () =>
+    ipcRenderer.invoke(IPC.discoverLocalResources),
   startWorkspace: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.startWorkspace, { workspaceId, targetId }),
   attachTerminal: (sessionId, terminalId) =>

@@ -4,6 +4,8 @@ export const IPC = {
   createWorkspace: "workspace:create",
   saveWorkspace: "workspace:save",
   choosePath: "workspace:choose-path",
+  inspectDirectory: "workspace:inspect-directory",
+  discoverLocalResources: "workspace:discover-local-resources",
   startWorkspace: "workspace:start",
   stopWorkspace: "workspace:stop",
   terminalAttach: "terminal:attach",

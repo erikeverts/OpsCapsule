@@ -15,6 +15,12 @@ The current iteration provides:
   YAML;
 - form-based management of directories, AWS connections, Kubernetes contexts,
   targets, agent commands, and isolation policies;
+- generated stable workspace and directory ids, plus version-control indicators
+  for configured directories;
+- discovery and workspace-scoped import of local AWS profiles and Kubernetes
+  contexts, while excluding AWS access keys and login caches;
+- per-workspace configuration directories and persistent, target-specific cloud
+  CLI state;
 - live validation and a generated YAML preview;
 - revision-aware, atomic manifest saves that refuse to overwrite external edits;
 - versioned YAML workspace manifests;
@@ -60,7 +66,8 @@ npm run build
 ```
 
 See [workspace manifests](docs/workspace-manifests.md),
-[ADR 0001](docs/adr/0001-electron-typescript-spike.md), and
-[ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md), and
-[ADR 0003](docs/adr/0003-workspace-studio.md) for configuration, decisions, and
-open questions.
+[ADR 0001](docs/adr/0001-electron-typescript-spike.md),
+[ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md),
+[ADR 0003](docs/adr/0003-workspace-studio.md), and
+[ADR 0004](docs/adr/0004-managed-workspace-resources.md) for configuration,
+decisions, and open questions.

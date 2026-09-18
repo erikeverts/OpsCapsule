@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
+  inspectDirectoryInput,
   saveWorkspaceInput,
   startWorkspaceInput,
   stopWorkspaceInput,
@@ -20,6 +21,10 @@ import {
 } from "./runtime-directory.js";
 import { TerminalManager } from "./terminal-manager.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
+import {
+  discoverLocalResources,
+  inspectDirectory,
+} from "./local-resources.js";
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
@@ -52,12 +57,20 @@ function registerIpcHandlers(): void {
     const { kind } = choosePathInput.parse(input);
     const options: Electron.OpenDialogOptions = {
       properties: [kind === "directory" ? "openDirectory" : "openFile"],
+      ...(process.platform === "darwin" ? { showHiddenFiles: true } : {}),
     };
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options);
     return result.canceled ? null : (result.filePaths[0] ?? null);
   });
+
+  ipcMain.handle(IPC.inspectDirectory, (_event, input: unknown) => {
+    const { path } = inspectDirectoryInput.parse(input);
+    return inspectDirectory(path);
+  });
+
+  ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
 
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);

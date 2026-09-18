@@ -1,8 +1,10 @@
 # Workspace manifests
 
-OpsCapsule discovers `*.yaml` and `*.yml` files in its application-data
-`config/workspaces` directory. The UI shows the exact directory and source file.
-Two fictional examples are created only when that directory contains no manifests.
+OpsCapsule discovers `config/workspaces/<id>/workspace.yaml` documents in its
+application-data directory. Legacy flat `*.yaml` and `*.yml` files remain
+readable and are migrated to the directory layout when saved in Workspace Studio.
+The UI shows the exact directory and source file. Two fictional examples are
+created only when the workspace configuration directory is empty.
 
 Workspace Studio can create and edit these files from the application. The forms
 and the YAML preview operate on the same public manifest model; there is no hidden
@@ -10,8 +12,12 @@ database representation. OpsCapsule validates the full manifest before saving,
 writes replacements atomically, and rejects a save if another process changed the
 file after it was opened.
 
-The editor stores references to AWS profiles and kubeconfig files, never access
-keys, tokens, or other credentials.
+The editor discovers local AWS profiles and Kubernetes contexts. Saving imports
+the selected configuration under the workspace's mode-restricted `resources`
+directory. AWS access-key fields are removed, and shared credentials, SSO tokens,
+and caches are not imported. A selected Kubernetes user can contain authentication
+material such as a token or client key, so the workspace directory is sensitive
+application data and must not be committed or exported implicitly.
 
 The public manifest format is versioned independently of internal TypeScript
 types:
@@ -37,21 +43,23 @@ See [`examples/workspace.yaml`](../examples/workspace.yaml) for a complete examp
 
 Multiple targets from the same workspace can run concurrently. They do not share
 process environments, kubeconfigs, synthetic home directories, or temporary
-directories.
+directories. Mutable cloud CLI state is stored under a target-specific state
+directory and is not shared with another target.
 
 ## Paths
 
-Absolute paths and paths beginning with `~/` are supported. Relative directory and
-kubeconfig paths are resolved relative to the manifest file.
+Absolute paths and paths beginning with `~/` are supported. Relative directory,
+kubeconfig, and provider-config paths are resolved relative to `workspace.yaml`.
 
 Every configured directory must exist before its target can launch. OpsCapsule
 resolves symbolic links to canonical paths before building the sandbox policy.
 
 ## Kubernetes sources
 
-`type: kubeconfig` extracts only the selected context, cluster, and user into a
-capsule-private kubeconfig. `type: generated` exists for credential-free examples
-and tests.
+Workspace Studio imports only the selected context, cluster, user, and referenced
+certificate/key files. At launch, `type: kubeconfig` extracts that managed context
+again into a capsule-private kubeconfig. `type: generated` exists for
+credential-free examples and tests.
 
 When a target has no Kubernetes context, OpsCapsule still sets `KUBECONFIG` to an
 empty capsule-private config. This prevents accidental fallback to the user's
@@ -83,10 +91,13 @@ Permission-expanding manifests belong in the trusted application-data directory,
 not inside an untrusted repository. A future import flow may read repository hints,
 but it must require explicit user approval before granting paths or network access.
 
-## Current authentication limitation
+## AWS authentication
 
-Enforced capsules intentionally use a synthetic home directory. Provider and agent
-credential brokering is not implemented yet, so a configured AWS profile or agent
-CLI that depends on files in the real home directory may require a future broker or
-an explicitly designed read grant. OpsCapsule does not expose the entire real home
-directory merely to make authentication work.
+The selected AWS profile and its referenced SSO configuration are copied into the
+workspace. On launch they are staged into a persistent, target-specific `.aws`
+directory. AWS SSO and CLI caches can therefore survive target restarts while the
+real home directory remains inaccessible.
+
+Static shared credentials are deliberately not imported. Profiles that require
+them need a future credential broker. When enforced isolation cannot open a system
+browser, use the AWS CLI's no-browser/device flow for SSO login.

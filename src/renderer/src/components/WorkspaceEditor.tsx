@@ -1,10 +1,19 @@
 import { useEffect, useMemo, useState } from "react";
 import { stringify } from "yaml";
 import { ZodError } from "zod";
-import type { WorkspaceDocument } from "../../../shared/contracts";
+import type {
+  DirectoryInspection,
+  LocalResourceOptions,
+  WorkspaceDocument,
+} from "../../../shared/contracts";
+import {
+  identifierFromName,
+  uniqueIdentifier,
+} from "../../../shared/identifiers";
 import {
   parseWorkspaceManifest,
   type CloudConnection,
+  type KubernetesContext,
   type WorkspaceManifest,
 } from "../../../shared/workspace-schema";
 
@@ -23,7 +32,7 @@ interface WorkspaceEditorProps {
 }
 
 interface AwsConfiguration extends Record<string, unknown> {
-  authentication: { type: "profile"; profile: string };
+  authentication: { type: "profile"; profile: string; configFile?: string };
   expectedIdentity: { accountId: string };
   defaults: { region: string };
 }
@@ -76,17 +85,6 @@ function blankWorkspace(): WorkspaceManifest {
   };
 }
 
-function uniqueId(base: string, ids: string[]): string {
-  if (!ids.includes(base)) {
-    return base;
-  }
-  let suffix = 2;
-  while (ids.includes(`${base}-${suffix}`)) {
-    suffix += 1;
-  }
-  return `${base}-${suffix}`;
-}
-
 function describeValidationError(error: unknown): string {
   if (error instanceof ZodError) {
     const issue = error.issues[0];
@@ -103,12 +101,56 @@ function awsConfiguration(connection: CloudConnection): AwsConfiguration {
     authentication: {
       type: "profile",
       profile: config.authentication?.profile ?? "",
+      ...(config.authentication?.configFile
+        ? { configFile: config.authentication.configFile }
+        : {}),
     },
     expectedIdentity: {
       accountId: config.expectedIdentity?.accountId ?? "",
     },
     defaults: { region: config.defaults?.region ?? "" },
   };
+}
+
+function matchesKubernetesOption(
+  option: LocalResourceOptions["kubernetesContexts"][number],
+  source: KubernetesContext["source"],
+): boolean {
+  return (
+    source.type === "kubeconfig" &&
+    option.path === source.path &&
+    option.name === source.context
+  );
+}
+
+function attachDiscoveredAwsConfigs(
+  current: WorkspaceManifest,
+  resources: LocalResourceOptions,
+): WorkspaceManifest {
+  const next = structuredClone(current);
+  let changed = false;
+  for (const connection of next.cloudConnections) {
+    if (connection.provider !== "aws") {
+      continue;
+    }
+    const config = awsConfiguration(connection);
+    if (config.authentication.configFile) {
+      continue;
+    }
+    const matches = resources.awsProfiles.filter(
+      ({ name }) => name === config.authentication.profile,
+    );
+    const profile = matches.length === 1 ? matches[0] : undefined;
+    if (!profile) {
+      continue;
+    }
+    config.authentication.configFile = profile.configFile;
+    config.defaults.region ||= profile.region ?? "";
+    config.expectedIdentity.accountId ||= profile.accountId ?? "";
+    connection.config = config;
+    changed = true;
+  }
+  return changed ? next : current;
 }
 
 function validateDraft(draft: WorkspaceManifest): string | null {
@@ -194,6 +236,19 @@ export function WorkspaceEditor({
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [localResources, setLocalResources] = useState<LocalResourceOptions>({
+    awsProfiles: [],
+    kubernetesContexts: [],
+  });
+  const [resourceDiscoveryError, setResourceDiscoveryError] = useState<
+    string | null
+  >(null);
+  const [directoryInspections, setDirectoryInspections] = useState<
+    Record<string, DirectoryInspection>
+  >({});
+  const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
+    () => (mode === "create" ? new Set(["workspace"]) : new Set()),
+  );
 
   useEffect(() => {
     if (mode !== "edit" || !workspaceId) {
@@ -227,6 +282,59 @@ export function WorkspaceEditor({
     };
   }, [mode, workspaceId]);
 
+  useEffect(() => {
+    let cancelled = false;
+    window.opsCapsule
+      .discoverLocalResources()
+      .then((resources) => {
+        if (!cancelled) {
+          setLocalResources(resources);
+          setResourceDiscoveryError(null);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setResourceDiscoveryError(describeValidationError(reason));
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (localResources.awsProfiles.length === 0) {
+      return;
+    }
+    setDraft((current) =>
+      current ? attachDiscoveredAwsConfigs(current, localResources) : current,
+    );
+  }, [document, localResources]);
+
+  const directoryPathKey = draft?.directories
+    .map(({ id, path }) => `${id}\0${path}`)
+    .join("\u0001") ?? "";
+  useEffect(() => {
+    let cancelled = false;
+    const directories = draft?.directories.filter(({ path }) => path) ?? [];
+    void Promise.all(
+      directories.map(async ({ id, path }) => {
+        try {
+          return [id, await window.opsCapsule.inspectDirectory(path)] as const;
+        } catch {
+          return [id, { path }] as const;
+        }
+      }),
+    ).then((inspections) => {
+      if (!cancelled) {
+        setDirectoryInspections(Object.fromEntries(inspections));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [directoryPathKey]);
+
   const yaml = useMemo(
     () => (draft ? stringify(draft, { lineWidth: 0 }) : ""),
     [draft],
@@ -256,6 +364,46 @@ export function WorkspaceEditor({
       return next;
     });
     setError(null);
+  }
+
+  function renameDirectory(index: number, name: string): void {
+    const directory = draft?.directories[index];
+    if (!directory) {
+      return;
+    }
+    const previous = directory.id;
+    const generated = generatedDirectoryIds.has(previous);
+    const id = generated
+      ? uniqueIdentifier(
+          name,
+          draft.directories
+            .filter((_, itemIndex) => itemIndex !== index)
+            .map((item) => item.id),
+        )
+      : previous;
+    updateDraft((next) => {
+      const item = next.directories[index]!;
+      item.name = name;
+      item.id = id;
+      if (id !== previous) {
+        for (const target of next.targets) {
+          target.directories = target.directories.map((directoryId) =>
+            directoryId === previous ? id : directoryId,
+          );
+          if (target.defaultDirectory === previous) {
+            target.defaultDirectory = id;
+          }
+        }
+      }
+    });
+    if (generated && id !== previous) {
+      setGeneratedDirectoryIds((current) => {
+        const next = new Set(current);
+        next.delete(previous);
+        next.add(id);
+        return next;
+      });
+    }
   }
 
   async function save(): Promise<void> {
@@ -366,22 +514,27 @@ export function WorkspaceEditor({
                     onChange={(event) =>
                       updateDraft((next) => {
                         next.metadata.name = event.target.value;
+                        if (mode === "create") {
+                          next.metadata.id = identifierFromName(
+                            event.target.value,
+                            "workspace",
+                          );
+                        }
                       })
                     }
                   />
                 </Field>
                 <Field
                   label="Stable id"
-                  hint={mode === "edit" ? "Ids cannot change after creation." : "Lowercase letters, numbers and hyphens."}
+                  hint={
+                    mode === "edit"
+                      ? "Generated when the workspace was created and now immutable."
+                      : "Generated from the workspace name."
+                  }
                 >
                   <input
-                    disabled={mode === "edit"}
+                    disabled
                     value={draft.metadata.id}
-                    onChange={(event) =>
-                      updateDraft((next) => {
-                        next.metadata.id = event.target.value;
-                      })
-                    }
                   />
                 </Field>
                 <Field label="Description" wide>
@@ -418,18 +571,23 @@ export function WorkspaceEditor({
                   <button
                     className="small-button"
                     onClick={() =>
-                      updateDraft((next) => {
-                        const id = uniqueId(
-                          "directory",
-                          next.directories.map((item) => item.id),
+                      {
+                        const id = uniqueIdentifier(
+                          "Directory",
+                          draft.directories.map((item) => item.id),
                         );
+                        setGeneratedDirectoryIds((current) =>
+                          new Set(current).add(id),
+                        );
+                        updateDraft((next) => {
                         next.directories.push({
                           id,
                           name: "Directory",
                           path: "",
                           access: "read-write",
                         });
-                      })
+                        });
+                      }
                     }
                     type="button"
                   >
@@ -441,7 +599,22 @@ export function WorkspaceEditor({
                 {draft.directories.map((directory, index) => (
                   <article className="studio-card" key={index}>
                     <div className="resource-card-header">
-                      <strong>{directory.name || "Untitled directory"}</strong>
+                      <div>
+                        <strong>{directory.name || "Untitled directory"}</strong>
+                        {directoryInspections[directory.id]?.versionControl ? (
+                          <span
+                            className="vcs-badge"
+                            title={
+                              directoryInspections[directory.id]?.versionControl
+                                ?.root
+                            }
+                          >
+                            {directoryInspections[
+                              directory.id
+                            ]?.versionControl?.type.toUpperCase()}
+                          </span>
+                        ) : null}
+                      </div>
                       <button
                         className="text-button danger"
                         disabled={draft.directories.length === 1}
@@ -469,30 +642,21 @@ export function WorkspaceEditor({
                         <input
                           value={directory.name}
                           onChange={(event) =>
-                            updateDraft((next) => {
-                              next.directories[index]!.name = event.target.value;
-                            })
+                            renameDirectory(index, event.target.value)
                           }
                         />
                       </Field>
-                      <Field label="Id">
+                      <Field
+                        label="Id"
+                        hint={
+                          generatedDirectoryIds.has(directory.id)
+                            ? "Generated from the directory name."
+                            : "Stable after the workspace is created."
+                        }
+                      >
                         <input
+                          disabled
                           value={directory.id}
-                          onChange={(event) =>
-                            updateDraft((next) => {
-                              const item = next.directories[index]!;
-                              const previous = item.id;
-                              item.id = event.target.value;
-                              for (const target of next.targets) {
-                                target.directories = target.directories.map((id) =>
-                                  id === previous ? item.id : id,
-                                );
-                                if (target.defaultDirectory === previous) {
-                                  target.defaultDirectory = item.id;
-                                }
-                              }
-                            })
-                          }
                         />
                       </Field>
                       <Field label="Access">
@@ -546,13 +710,13 @@ export function WorkspaceEditor({
             <>
               <EditorSectionHeader
                 title="Cloud connections"
-                description="Connections contain profile references and expected identities, never credentials."
+                description="Select a local profile to copy its non-secret configuration into this workspace. Credentials are never copied."
                 action={
                   <button
                     className="small-button"
                     onClick={() =>
                       updateDraft((next) => {
-                        const id = uniqueId(
+                        const id = uniqueIdentifier(
                           "aws",
                           next.cloudConnections.map((item) => item.id),
                         );
@@ -574,12 +738,22 @@ export function WorkspaceEditor({
                   </button>
                 }
               />
+              {resourceDiscoveryError ? (
+                <div className="resource-discovery-note">
+                  Local profiles could not be read: {resourceDiscoveryError}
+                </div>
+              ) : null}
               {draft.cloudConnections.length === 0 ? (
                 <div className="studio-empty">No cloud connections configured.</div>
               ) : null}
               <div className="studio-stack">
                 {draft.cloudConnections.map((connection, index) => {
                   const config = awsConfiguration(connection);
+                  const selectedProfileIndex = localResources.awsProfiles.findIndex(
+                    (profile) =>
+                      profile.name === config.authentication.profile &&
+                      profile.configFile === config.authentication.configFile,
+                  );
                   const updateConfig = (
                     change: (next: AwsConfiguration) => void,
                   ) =>
@@ -648,16 +822,66 @@ export function WorkspaceEditor({
                         </Field>
                         {connection.provider === "aws" ? (
                           <>
-                            <Field label="AWS profile">
-                              <input
-                                placeholder="customer-nonprod"
-                                value={config.authentication.profile}
-                                onChange={(event) =>
-                                  updateConfig((next) => {
-                                    next.authentication.profile = event.target.value;
-                                  })
+                            <Field
+                              label="AWS profile"
+                              hint={
+                                config.authentication.configFile
+                                  ? `Configuration source: ${config.authentication.configFile}`
+                                  : "Choose a local profile so OpsCapsule can import its configuration."
+                              }
+                            >
+                              <select
+                                value={
+                                  selectedProfileIndex >= 0
+                                    ? String(selectedProfileIndex)
+                                    : config.authentication.profile
+                                      ? "current"
+                                      : ""
                                 }
-                              />
+                                onChange={(event) => {
+                                  const profile =
+                                    localResources.awsProfiles[
+                                      Number(event.target.value)
+                                    ];
+                                  if (!profile) {
+                                    return;
+                                  }
+                                  updateConfig((next) => {
+                                    next.authentication.profile = profile.name;
+                                    next.authentication.configFile =
+                                      profile.configFile;
+                                    if (profile.region) {
+                                      next.defaults.region = profile.region;
+                                    }
+                                    if (profile.accountId) {
+                                      next.expectedIdentity.accountId =
+                                        profile.accountId;
+                                    }
+                                  });
+                                }}
+                              >
+                                <option disabled value="">
+                                  Select a local AWS profile…
+                                </option>
+                                {selectedProfileIndex < 0 &&
+                                config.authentication.profile ? (
+                                  <option value="current">
+                                    {config.authentication.profile} (
+                                    {config.authentication.configFile
+                                      ? "workspace copy"
+                                      : "not imported"}
+                                    )
+                                  </option>
+                                ) : null}
+                                {localResources.awsProfiles.map((profile, optionIndex) => (
+                                  <option
+                                    key={`${profile.configFile}:${profile.name}`}
+                                    value={optionIndex}
+                                  >
+                                    {profile.name}
+                                  </option>
+                                ))}
+                              </select>
                             </Field>
                             <Field label="Expected account id">
                               <input
@@ -707,13 +931,13 @@ export function WorkspaceEditor({
             <>
               <EditorSectionHeader
                 title="Kubernetes contexts"
-                description="Reference one context from a kubeconfig, or describe a generated context."
+                description="Select a local context to copy only that context and its referenced files into this workspace."
                 action={
                   <button
                     className="small-button"
                     onClick={() =>
                       updateDraft((next) => {
-                        const id = uniqueId(
+                        const id = uniqueIdentifier(
                           "cluster",
                           next.kubernetesContexts.map((item) => item.id),
                         );
@@ -730,6 +954,11 @@ export function WorkspaceEditor({
                   </button>
                 }
               />
+              {resourceDiscoveryError ? (
+                <div className="resource-discovery-note">
+                  Local contexts could not be read: {resourceDiscoveryError}
+                </div>
+              ) : null}
               {draft.kubernetesContexts.length === 0 ? (
                 <div className="studio-empty">No Kubernetes contexts configured.</div>
               ) : null}
@@ -818,37 +1047,122 @@ export function WorkspaceEditor({
                         </select>
                       </Field>
                       {context.source.type === "kubeconfig" ? (
-                        <Field label="Kubeconfig path" wide>
-                          <div className="path-input">
-                            <input
-                              value={context.source.path}
-                              onChange={(event) =>
-                                updateDraft((next) => {
-                                  const source = next.kubernetesContexts[index]!.source;
-                                  if (source.type === "kubeconfig") {
-                                    source.path = event.target.value;
-                                  }
-                                })
-                              }
-                            />
-                            <button
-                              className="small-button"
-                              onClick={() =>
-                                void browsePath("file", (path) =>
-                                  updateDraft((next) => {
-                                    const source = next.kubernetesContexts[index]!.source;
-                                    if (source.type === "kubeconfig") {
-                                      source.path = path;
-                                    }
-                                  }),
+                        <>
+                          <Field
+                            label="Local context"
+                            hint={`Configuration source: ${context.source.path || "not selected"}`}
+                            wide
+                          >
+                            <select
+                              value={
+                                localResources.kubernetesContexts.some(
+                                  (option) =>
+                                    matchesKubernetesOption(
+                                      option,
+                                      context.source,
+                                    ),
                                 )
+                                  ? JSON.stringify([
+                                      context.source.path,
+                                      context.source.context,
+                                    ])
+                                  : context.source.path && context.source.context
+                                    ? "current"
+                                    : ""
                               }
-                              type="button"
+                              onChange={(event) => {
+                                const option =
+                                  localResources.kubernetesContexts.find(
+                                    (candidate) =>
+                                      JSON.stringify([
+                                        candidate.path,
+                                        candidate.name,
+                                      ]) === event.target.value,
+                                  );
+                                if (!option) {
+                                  return;
+                                }
+                                updateDraft((next) => {
+                                  const item = next.kubernetesContexts[index]!;
+                                  item.source = {
+                                    type: "kubeconfig",
+                                    path: option.path,
+                                    context: option.name,
+                                  };
+                                  if (option.namespace) {
+                                    item.namespace = option.namespace;
+                                  }
+                                });
+                              }}
                             >
-                              Browse…
-                            </button>
-                          </div>
-                        </Field>
+                              <option disabled value="">
+                                Select a local Kubernetes context…
+                              </option>
+                              {context.source.path &&
+                              context.source.context &&
+                              !localResources.kubernetesContexts.some(
+                                (option) =>
+                                  matchesKubernetesOption(
+                                    option,
+                                    context.source,
+                                  ),
+                              ) ? (
+                                <option value="current">
+                                  {context.source.context} (workspace copy)
+                                </option>
+                              ) : null}
+                              {localResources.kubernetesContexts.map((option) => (
+                                <option
+                                  key={`${option.path}:${option.name}`}
+                                  value={JSON.stringify([
+                                    option.path,
+                                    option.name,
+                                  ])}
+                                >
+                                  {option.name}
+                                  {option.current ? " · current" : ""}
+                                </option>
+                              ))}
+                            </select>
+                          </Field>
+                          <Field
+                            label="Other kubeconfig"
+                            hint="Fallback for kubeconfig files outside the standard locations."
+                            wide
+                          >
+                            <div className="path-input">
+                              <input
+                                value={context.source.path}
+                                onChange={(event) =>
+                                  updateDraft((next) => {
+                                    const source =
+                                      next.kubernetesContexts[index]!.source;
+                                    if (source.type === "kubeconfig") {
+                                      source.path = event.target.value;
+                                    }
+                                  })
+                                }
+                              />
+                              <button
+                                className="small-button"
+                                onClick={() =>
+                                  void browsePath("file", (path) =>
+                                    updateDraft((next) => {
+                                      const source =
+                                        next.kubernetesContexts[index]!.source;
+                                      if (source.type === "kubeconfig") {
+                                        source.path = path;
+                                      }
+                                    }),
+                                  )
+                                }
+                                type="button"
+                              >
+                                Browse…
+                              </button>
+                            </div>
+                          </Field>
+                        </>
                       ) : (
                         <Field label="API server" wide>
                           <input
@@ -893,7 +1207,7 @@ export function WorkspaceEditor({
                     className="small-button"
                     onClick={() =>
                       updateDraft((next) => {
-                        const id = uniqueId(
+                        const id = uniqueIdentifier(
                           "target",
                           next.targets.map((item) => item.id),
                         );
