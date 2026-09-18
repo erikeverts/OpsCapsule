@@ -270,6 +270,20 @@ export class WorkspaceRegistry {
     return this.resolve(workspace, target);
   }
 
+  async resolveAgentConfigurationPath(
+    workspaceId: string,
+    configuredPath: string,
+  ): Promise<string> {
+    const workspace = await this.findWorkspace(workspaceId);
+    const declared = workspace.manifest.agentProfiles.some((profile) =>
+      profile.configuration.files.some(({ source }) => source === configuredPath),
+    );
+    if (!declared) {
+      throw new Error("The file is not declared by this workspace");
+    }
+    return resolveConfiguredPath(configuredPath, workspace.sourcePath);
+  }
+
   private async findWorkspace(workspaceId: string): Promise<LoadedWorkspace> {
     const { workspaces } = await this.loadAll();
     const workspace = workspaces.find(

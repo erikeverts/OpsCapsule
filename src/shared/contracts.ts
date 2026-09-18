@@ -108,10 +108,30 @@ export interface KubernetesContextOption {
 }
 
 export interface AgentConfigurationFileOption {
-  adapter: "opencode";
+  adapter: "opencode" | "claude-code";
   name: string;
   path: string;
   destination: string;
+  warnings: AgentConfigurationWarning[];
+}
+
+export type AgentConfigurationWarningCategory =
+  | "identity"
+  | "credentials"
+  | "hooks"
+  | "plugins"
+  | "mcp"
+  | "unparsed";
+
+export interface AgentConfigurationWarning {
+  category: AgentConfigurationWarningCategory;
+  severity: "warning" | "danger";
+  message: string;
+}
+
+export interface AgentConfigurationInspection {
+  path: string;
+  warnings: AgentConfigurationWarning[];
 }
 
 export interface LocalResourceOptions {
@@ -128,6 +148,21 @@ export interface RuntimePaths {
   sandboxConfig: string;
   targetState: string;
   agentState: string;
+  agentInstructions?: string;
+}
+
+export type ReadinessCheckStatus = "pass" | "warning" | "fail";
+
+export interface TargetReadinessCheck {
+  id: string;
+  label: string;
+  status: ReadinessCheckStatus;
+  detail: string;
+}
+
+export interface TargetReadinessReport {
+  status: "ready" | "attention" | "blocked";
+  checks: TargetReadinessCheck[];
 }
 
 export interface EffectiveIsolation {
@@ -192,6 +227,11 @@ export const inspectDirectoryInput = z.object({
   path: z.string().min(1),
 });
 
+export const inspectAgentConfigurationInput = z.object({
+  path: z.string().min(1),
+  workspaceId: z.string().min(1).optional(),
+});
+
 export const terminalWriteInput = z.object({
   sessionId: z.string().min(1),
   terminalId: z.string().min(1),
@@ -225,7 +265,15 @@ export interface OpsCapsuleApi {
   ): Promise<WorkspaceDocument>;
   choosePath(kind: "directory" | "file"): Promise<string | null>;
   inspectDirectory(path: string): Promise<DirectoryInspection>;
+  inspectAgentConfiguration(
+    path: string,
+    workspaceId?: string,
+  ): Promise<AgentConfigurationInspection>;
   discoverLocalResources(): Promise<LocalResourceOptions>;
+  checkTargetReadiness(
+    workspaceId: string,
+    targetId: string,
+  ): Promise<TargetReadinessReport>;
   startWorkspace(
     workspaceId: string,
     targetId: string,

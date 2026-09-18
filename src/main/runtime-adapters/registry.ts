@@ -1,6 +1,7 @@
 import type { RuntimeAdapter } from "./types.js";
 import type { ResolvedAgentProfile } from "../workspace-registry.js";
 import { CommandRuntimeAdapter } from "./command.js";
+import { ClaudeCodeRuntimeAdapter } from "./claude-code.js";
 import { OpenCodeRuntimeAdapter } from "./opencode.js";
 
 export class RuntimeAdapterRegistry {
@@ -11,6 +12,9 @@ export class RuntimeAdapterRegistry {
     }
     if (profile.adapter === "opencode") {
       return new OpenCodeRuntimeAdapter(profile);
+    }
+    if (profile.adapter === "claude-code") {
+      return new ClaudeCodeRuntimeAdapter(profile);
     }
     throw new Error(
       `Agent adapter '${profile.adapter}' is not available on this installation`,

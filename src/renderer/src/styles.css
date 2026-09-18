@@ -527,6 +527,92 @@ button {
   margin: 0 0 19px;
 }
 
+.readiness-report {
+  display: grid;
+  gap: 6px;
+  width: min(620px, 90%);
+  margin: 0 0 16px;
+  text-align: left;
+}
+
+.readiness-report header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 2px 3px;
+  color: #899da6;
+  font-size: 10px;
+}
+
+.readiness-summary {
+  padding: 3px 7px;
+  border: 1px solid #3b5058;
+  border-radius: 999px;
+  color: #91a8b0;
+  font-size: 8px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.readiness-summary.ready {
+  color: #8fd7b0;
+  border-color: #3a6651;
+}
+
+.readiness-summary.attention {
+  color: #d5bd78;
+  border-color: #66572f;
+}
+
+.readiness-summary.blocked {
+  color: #e09b94;
+  border-color: #754640;
+}
+
+.readiness-check {
+  display: grid;
+  grid-template-columns: 10px 165px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #24343c;
+  border-radius: 6px;
+  background: #0d161c;
+}
+
+.readiness-check strong {
+  color: #9cafb7;
+  font-size: 9px;
+}
+
+.readiness-check small {
+  overflow: hidden;
+  color: #687c85;
+  font-size: 9px;
+  line-height: 1.35;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.readiness-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #73858c;
+}
+
+.readiness-dot.pass {
+  background: #70c99a;
+}
+
+.readiness-dot.warning {
+  background: #c8a95b;
+}
+
+.readiness-dot.fail {
+  background: #d47b72;
+}
+
 .permission-preview div {
   display: grid;
   grid-template-columns: 29px minmax(0, 1fr);
@@ -1080,6 +1166,30 @@ button {
   color: #c9d8dd;
   background: #0b1318;
   font: 10px "SFMono-Regular", Consolas, monospace;
+}
+
+.configuration-file-warning {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: 76px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 9px;
+  border: 1px solid #5f512e;
+  border-radius: 6px;
+  color: #b9a467;
+  background: #211d12;
+  font-size: 9px;
+  line-height: 1.4;
+}
+
+.configuration-file-warning.danger {
+  border-color: #74433e;
+  color: #dda09a;
+  background: #2a1817;
+}
+
+.configuration-file-warning strong {
+  text-transform: uppercase;
 }
 
 .target-editor-card {

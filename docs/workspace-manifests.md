@@ -49,6 +49,10 @@ Reusable agent configuration belongs to the workspace. Existing
 `target.agentRuntime` declarations remain supported as a compatibility path when
 neither the target nor workspace selects a managed profile.
 
+An optional workspace-level `agentInstructions` Markdown string carries portable,
+non-secret operating guidance. The resolved adapter materializes it in its native
+instruction format for every target without granting another filesystem root.
+
 Multiple targets from the same workspace can run concurrently. They do not share
 process environments, kubeconfigs, synthetic home directories, or temporary
 directories. Mutable cloud CLI state is stored under a target-specific state

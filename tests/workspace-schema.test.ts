@@ -71,6 +71,33 @@ describe("workspace agent profile schema", () => {
     expect(parsed.targets[0]?.agentRuntime).toBeUndefined();
   });
 
+  it("accepts portable instructions and Claude Code settings", () => {
+    const input = manifest();
+    input.agentInstructions = "# Workspace\n\nVerify the target before changes.\n";
+    input.agentProfiles = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        adapter: "claude-code",
+        runtime: { command: "claude", args: [] },
+        configuration: {
+          files: [
+            {
+              source: "resources/agents/claude/settings.json",
+              destination: ".claude/settings.json",
+            },
+          ],
+        },
+      },
+    ];
+    input.defaultAgentProfile = "claude";
+
+    const parsed = parseWorkspaceManifest(input);
+
+    expect(parsed.agentInstructions).toContain("Verify the target");
+    expect(parsed.agentProfiles[0]?.adapter).toBe("claude-code");
+  });
+
   it("rejects unknown profile references", () => {
     const input = manifest();
     input.defaultAgentProfile = "missing";
@@ -92,6 +119,24 @@ describe("workspace agent profile schema", () => {
       },
     ];
     input.defaultAgentProfile = "custom";
+
+    expect(() => parseWorkspaceManifest(input)).toThrow(
+      "managed by OpsCapsule",
+    );
+  });
+
+  it("does not let a profile replace Claude Code's isolated state directory", () => {
+    const input = manifest();
+    input.agentProfiles = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        adapter: "claude-code",
+        runtime: { command: "claude", args: [] },
+        environment: { CLAUDE_CONFIG_DIR: "/tmp/shared" },
+      },
+    ];
+    input.defaultAgentProfile = "claude";
 
     expect(() => parseWorkspaceManifest(input)).toThrow(
       "managed by OpsCapsule",
@@ -121,5 +166,30 @@ describe("workspace agent profile schema", () => {
     input.defaultAgentProfile = "opencode";
 
     expect(() => parseWorkspaceManifest(input)).toThrow(message);
+  });
+
+  it("rejects unsupported Claude Code configuration destinations", () => {
+    const input = manifest();
+    input.agentProfiles = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        adapter: "claude-code",
+        runtime: { command: "claude", args: [] },
+        configuration: {
+          files: [
+            {
+              source: "/tmp/credentials.json",
+              destination: ".claude/.credentials.json",
+            },
+          ],
+        },
+      },
+    ];
+    input.defaultAgentProfile = "claude";
+
+    expect(() => parseWorkspaceManifest(input)).toThrow(
+      "Claude Code profiles support only settings.json",
+    );
   });
 });

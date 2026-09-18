@@ -65,6 +65,7 @@ const reservedAgentEnvironmentVariables = new Set([
   "TMP",
   "TEMP",
   "CLAUDE_CODE_TMPDIR",
+  "CLAUDE_CONFIG_DIR",
   "KUBECONFIG",
   "AWS_PROFILE",
   "AWS_DEFAULT_PROFILE",
@@ -150,6 +151,16 @@ export const agentProfileSchema = z
           message: "OpenCode profiles support only opencode.json and tui.json settings",
         });
       }
+      if (
+        profile.adapter === "claude-code" &&
+        destination !== ".claude/settings.json"
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["configuration", "files", index, "destination"],
+          message: "Claude Code profiles support only settings.json",
+        });
+      }
     }
   });
 
@@ -232,6 +243,7 @@ export const workspaceManifestSchema = z.object({
     name: z.string().min(1),
     description: z.string().min(1).optional(),
   }),
+  agentInstructions: z.string().max(50_000).optional(),
   agentProfiles: z.array(agentProfileSchema).default([]),
   defaultAgentProfile: identifier.optional(),
   cloudConnections: z.array(cloudConnectionSchema).default([]),

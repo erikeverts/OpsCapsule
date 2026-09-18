@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from "react";
 import { stringify } from "yaml";
 import { ZodError } from "zod";
 import type {
+  AgentConfigurationWarning,
   DirectoryInspection,
   LocalResourceOptions,
   WorkspaceDocument,
@@ -287,6 +288,9 @@ export function WorkspaceEditor({
   const [directoryInspections, setDirectoryInspections] = useState<
     Record<string, DirectoryInspection>
   >({});
+  const [agentConfigurationWarnings, setAgentConfigurationWarnings] = useState<
+    Record<string, AgentConfigurationWarning[]>
+  >({});
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
     () => (mode === "create" ? new Set(["workspace"]) : new Set()),
   );
@@ -386,6 +390,37 @@ export function WorkspaceEditor({
       cancelled = true;
     };
   }, [directoryPathKey]);
+
+  const agentConfigurationPathKey = draft?.agentProfiles
+    .flatMap(({ configuration }) => configuration.files.map(({ source }) => source))
+    .filter(Boolean)
+    .join("\u0001") ?? "";
+  useEffect(() => {
+    let cancelled = false;
+    const sources = agentConfigurationPathKey
+      ? [...new Set(agentConfigurationPathKey.split("\u0001"))]
+      : [];
+    void Promise.all(
+      sources.map(async (source) => {
+        try {
+          const inspection = await window.opsCapsule.inspectAgentConfiguration(
+            source,
+            mode === "edit" ? workspaceId : undefined,
+          );
+          return [source, inspection.warnings] as const;
+        } catch {
+          return [source, []] as const;
+        }
+      }),
+    ).then((inspections) => {
+      if (!cancelled) {
+        setAgentConfigurationWarnings(Object.fromEntries(inspections));
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [agentConfigurationPathKey, mode, workspaceId]);
 
   const yaml = useMemo(
     () => (draft ? stringify(draft, { lineWidth: 0 }) : ""),
@@ -1330,6 +1365,29 @@ export function WorkspaceEditor({
               <div className="studio-stack">
                 <div className="studio-card studio-fields">
                   <Field
+                    label="Portable workspace instructions"
+                    hint="Applied to every target. OpenCode receives AGENTS.md, Claude Code receives CLAUDE.md, and custom commands receive OPSCAPSULE_AGENT_INSTRUCTIONS. Do not put secrets here."
+                    wide
+                  >
+                    <textarea
+                      placeholder="Describe the workspace, operating conventions, safe verification steps, and escalation rules…"
+                      rows={8}
+                      value={draft.agentInstructions ?? ""}
+                      onChange={(event) =>
+                        updateDraft((next) => {
+                          const value = event.target.value;
+                          if (value) {
+                            next.agentInstructions = value;
+                          } else {
+                            delete next.agentInstructions;
+                          }
+                        })
+                      }
+                    />
+                  </Field>
+                </div>
+                <div className="studio-card studio-fields">
+                  <Field
                     label="Workspace default"
                     hint="Targets inherit this profile unless they select an override."
                     wide
@@ -1371,6 +1429,12 @@ export function WorkspaceEditor({
                     ".config/opencode/opencode.json",
                     ".config/opencode/tui.json",
                   ];
+                  const claudeCodeDestinations = [".claude/settings.json"];
+                  const adapterDestinations = profile.adapter === "opencode"
+                    ? openCodeDestinations
+                    : profile.adapter === "claude-code"
+                      ? claudeCodeDestinations
+                      : [];
                   return (
                     <article className="studio-card" key={index}>
                       <div className="resource-card-header">
@@ -1440,12 +1504,19 @@ export function WorkspaceEditor({
                                 ) {
                                   item.runtime.command = "opencode";
                                 }
+                                if (
+                                  item.adapter === "claude-code" &&
+                                  ["$SHELL", "opencode"].includes(item.runtime.command)
+                                ) {
+                                  item.runtime.command = "claude";
+                                }
                               })
                             }
                           >
                             <option value="command">Custom command</option>
                             <option value="opencode">OpenCode</option>
-                            {!["command", "opencode"].includes(profile.adapter) ? (
+                            <option value="claude-code">Claude Code</option>
+                            {!["command", "opencode", "claude-code"].includes(profile.adapter) ? (
                               <option value={profile.adapter}>{profile.adapter}</option>
                             ) : null}
                           </select>
@@ -1531,7 +1602,11 @@ export function WorkspaceEditor({
                                       type="checkbox"
                                     />
                                     <span>{option.name}</span>
-                                    <small>managed</small>
+                                    <small>
+                                      {option.warnings.length > 0
+                                        ? `review ${option.warnings.map(({ category }) => category).join(", ")}`
+                                        : "managed"}
+                                    </small>
                                   </label>
                                 );
                               })}
@@ -1572,7 +1647,7 @@ export function WorkspaceEditor({
                                     Browse…
                                   </button>
                                 </div>
-                                {profile.adapter === "opencode" ? (
+                                {adapterDestinations.length > 0 ? (
                                   <select
                                     aria-label="Configuration destination"
                                     value={file.destination}
@@ -1584,7 +1659,7 @@ export function WorkspaceEditor({
                                       })
                                     }
                                   >
-                                    {openCodeDestinations.map((destination) => (
+                                    {adapterDestinations.map((destination) => (
                                       <option key={destination} value={destination}>
                                         {destination}
                                       </option>
@@ -1617,13 +1692,24 @@ export function WorkspaceEditor({
                                 >
                                   Remove file
                                 </button>
+                                {(agentConfigurationWarnings[file.source] ?? []).map(
+                                  (warning) => (
+                                    <div
+                                      className={`configuration-file-warning ${warning.severity}`}
+                                      key={warning.category}
+                                    >
+                                      <strong>{warning.category}</strong>
+                                      <span>{warning.message}</span>
+                                    </div>
+                                  ),
+                                )}
                               </div>
                             ))}
                             <button
                               className="small-button"
                               disabled={
-                                profile.adapter === "opencode" &&
-                                openCodeDestinations.every((destination) =>
+                                adapterDestinations.length > 0 &&
+                                adapterDestinations.every((destination) =>
                                   profile.configuration.files.some(
                                     (file) => file.destination === destination,
                                   ),
@@ -1633,14 +1719,14 @@ export function WorkspaceEditor({
                                 updateDraft((next) => {
                                   const item = next.agentProfiles[index]!;
                                   const destination =
-                                    item.adapter === "opencode"
-                                      ? openCodeDestinations.find(
+                                    adapterDestinations.length > 0
+                                      ? adapterDestinations.find(
                                           (candidate) =>
                                             !item.configuration.files.some(
                                               (file) =>
                                                 file.destination === candidate,
                                             ),
-                                        ) ?? openCodeDestinations[0]!
+                                        ) ?? adapterDestinations[0]!
                                       : ".config/agent/config.json";
                                   item.configuration.files.push({
                                     source: "",

@@ -43,11 +43,11 @@ An agent profile declares:
 - zero or more managed configuration files with workspace-relative sources and
   synthetic-home-relative destinations.
 
-The first adapter-specific integration is `opencode`. The `command` adapter
-remains the generic fallback for any interactive CLI. Adapters translate the
-portable profile into process and filesystem preparation; they do not embed or
-call an agent SDK. Unknown adapter ids remain representable but make a target
-unavailable until an adapter is installed.
+The first adapter-specific integrations are `opencode` and `claude-code`. The
+`command` adapter remains the generic fallback for any interactive CLI. Adapters
+translate the portable profile into process and filesystem preparation; they do
+not embed or call an agent SDK. Unknown adapter ids remain representable but make
+a target unavailable until an adapter is installed.
 
 The manifest contract is specified in
 [`docs/agent-profiles.md`](../agent-profiles.md).
@@ -102,7 +102,7 @@ from the target's isolated AWS connection and target-specific AWS state. Another
 profile could launch the same agent with a different provider without changing
 the target model.
 
-### Future workspace context and tools
+### Workspace context and tools
 
 Agent profiles describe **how an agent runs**. They must not become the container
 for everything an agent knows about a workspace. A future workspace context model
@@ -120,14 +120,21 @@ The context model is expected to support these distinct resource types:
   file such as `AGENTS.md`, `CLAUDE.md`, or another tool-specific equivalent; and
 - explicitly enabled tools, including future MCP server declarations.
 
-The exact manifest fields are deferred, but the trust boundaries are not. Context
-documents and instruction files must be explicit, inspectable resources. A local
-document can be imported as a managed snapshot or reference a file already covered
-by a declared workspace directory; a future connector-backed document must retain
-its source, synchronization status, and last-updated information. Declaring a
-document does not require injecting its complete contents into every prompt. An
-adapter can expose a small catalog and let the agent read relevant documents on
-demand, avoiding unnecessary context-window use.
+The first implemented context resource is an optional `agentInstructions`
+Markdown string. It belongs to the workspace rather than a profile. At launch,
+the adapter materializes it as global `AGENTS.md` for OpenCode, as `CLAUDE.md`
+inside the target/profile-specific Claude Code configuration directory, or
+exposes its canonical path as `OPSCAPSULE_AGENT_INSTRUCTIONS` to a generic
+command. It is not a secret store, document library, or conversation memory.
+
+The remaining manifest fields are deferred, but the trust boundaries are not.
+Context documents and instruction files must be explicit, inspectable resources.
+A local document can be imported as a managed snapshot or reference a file already
+covered by a declared workspace directory; a future connector-backed document
+must retain its source, synchronization status, and last-updated information.
+Declaring a document does not require injecting its complete contents into every
+prompt. An adapter can expose a small catalog and let the agent read relevant
+documents on demand, avoiding unnecessary context-window use.
 
 Workspace context is read-only to the running agent by default and cannot expand
 the target's filesystem or network policy. Metadata and documents may contain
@@ -144,12 +151,15 @@ credentials through a future broker. Workspace or target policy can then select
 which declared servers a profile may use, while an adapter materializes only
 those selections into its native configuration format.
 
-Agent-native configuration imported in the first slice may already contain hooks
-or MCP declarations. It remains constrained by the process sandbox and network
-policy. The initial UI shows the exact imported files and a warning; structured
-inspection of individual hooks and MCP entries belongs with the future normalized
-workspace tool model. That model is the portable and policy-aware replacement and
-is not part of the initial agent-profile schema.
+Agent-native configuration may already contain credentials, hooks, plugins, or
+MCP declarations. It remains constrained by the process sandbox and network
+policy. OpsCapsule performs a conservative inspection and shows structured
+warning categories without returning configuration values to the renderer.
+Settings that appear to replace capsule-managed identity or isolation paths block
+launch; other findings require review. Inspection does not claim to prove a file
+safe. Policy for individual hooks and MCP entries belongs with the future
+normalized workspace tool model. That model is the portable and policy-aware
+replacement and is not part of the agent-profile schema.
 
 ### Mutable agent state
 
@@ -164,20 +174,25 @@ state/workspaces/<workspace-id>/targets/<target-id>/agents/<profile-id>/
 
 An adapter maps only its required mutable locations into that directory. State is
 not shared automatically between development and production, even when both use
-the same profile. Workspace-level instructions or curated memory may be added
-later as explicit, inspectable resources; raw global agent history is not treated
-as workspace memory.
+the same profile. Portable workspace instructions are copied explicitly; raw
+global agent history is not treated as workspace memory.
 
 ### Readiness and launch
 
-Before a target starts, its resolved adapter performs non-mutating readiness
-checks. The initial checks are:
+The target screen performs non-mutating readiness checks before launch. The
+checks cover:
 
-- the command resolves to an executable that is reachable inside the sandbox;
-- every managed configuration source exists within the workspace resource root;
-- every configuration destination is a safe relative path beneath the synthetic
-  home; and
-- the adapter is available on the current platform.
+- the command resolves to a host executable;
+- managed configuration sources exist and their mappings passed structural path
+  validation;
+- the adapter is available on the current platform;
+- configured directories are accessible with their declared mode; and
+- enforced sandbox prerequisites are installed and usable.
+
+The report also calls out missing portable instructions and structured concerns
+found in managed configuration. Warnings do not block launch; failed checks do.
+The launch path repeats authoritative executable and sandbox-reachability checks
+because the host can change after the report was rendered.
 
 Adapter-specific checks may be added, but a version command is not assumed to be
 safe or universally supported. A failed check prevents only the affected target
@@ -207,6 +222,6 @@ legacy field after all supported workspaces have a deterministic migration path.
   needed at the boundary.
 - Importing configuration is a security-sensitive operation and needs inspection,
   warnings, and tests for path containment.
-- Workspace metadata, reference documents, portable instructions, normalized MCP
-  resources, provider secret brokering, shared memory, plugin synchronization,
-  and additional agent adapters remain separate increments.
+- Workspace metadata, reference documents, normalized MCP resources, provider
+  secret brokering, shared memory, plugin synchronization, and additional agent
+  adapters remain separate increments.

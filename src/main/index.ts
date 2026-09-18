@@ -1,9 +1,10 @@
-import { join } from "node:path";
+import { isAbsolute, join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
   inspectDirectoryInput,
+  inspectAgentConfigurationInput,
   saveWorkspaceInput,
   startWorkspaceInput,
   stopWorkspaceInput,
@@ -20,9 +21,11 @@ import {
   createWorkspaceRuntime,
 } from "./runtime-directory.js";
 import { TerminalManager } from "./terminal-manager.js";
+import { checkTargetReadiness } from "./target-readiness.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 import {
   discoverLocalResources,
+  inspectAgentConfigurationFile,
   inspectDirectory,
 } from "./local-resources.js";
 
@@ -70,7 +73,29 @@ function registerIpcHandlers(): void {
     return inspectDirectory(path);
   });
 
+  ipcMain.handle(IPC.inspectAgentConfiguration, async (_event, input: unknown) => {
+    const { path, workspaceId } = inspectAgentConfigurationInput.parse(input);
+    let resolvedPath = path;
+    if (!isAbsolute(path)) {
+      if (!workspaceId) {
+        throw new Error("A workspace id is required for a managed relative path");
+      }
+      resolvedPath = await workspaceRegistry.resolveAgentConfigurationPath(
+        workspaceId,
+        path,
+      );
+    }
+    return inspectAgentConfigurationFile(resolvedPath);
+  });
+
   ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
+
+  ipcMain.handle(IPC.checkTargetReadiness, async (_event, input: unknown) => {
+    const { workspaceId, targetId } = startWorkspaceInput.parse(input);
+    return checkTargetReadiness(
+      await workspaceRegistry.resolveTarget(workspaceId, targetId),
+    );
+  });
 
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);

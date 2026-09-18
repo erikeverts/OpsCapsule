@@ -15,7 +15,14 @@ The current iteration provides:
   YAML;
 - reusable workspace-level agent profiles with a workspace default and optional
   target overrides;
-- managed OpenCode settings imports and a generic custom-command adapter;
+- managed OpenCode and Claude Code settings imports, plus a generic
+  custom-command adapter;
+- portable workspace instructions translated to `AGENTS.md`, `CLAUDE.md`, or
+  an explicit environment path by the selected adapter;
+- structured warnings for imported identity overrides, credentials, hooks,
+  plugins, and MCP declarations;
+- a visible, non-mutating readiness report for agent, filesystem, and sandbox
+  prerequisites before launch;
 - persistent agent data, cache, and session state isolated by workspace, target,
   and profile;
 - agent executable and sandbox-reachability checks before terminals start;
@@ -42,9 +49,9 @@ The current iteration provides:
 - automated checks for workspace isolation and IPC input validation.
 
 The included examples contain no credentials and use `.invalid` endpoints.
-Provider and agent credential brokering, portable workspace context, identity
-preflight, packaging, and a full security review are still required before
-production use.
+Provider and agent credential brokering, workspace metadata and reference
+documents, identity preflight, packaging, and a full security review are still
+required before production use.
 
 ## Development
 

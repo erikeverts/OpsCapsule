@@ -15,6 +15,7 @@ import {
   discoverAgentConfigurationFiles,
   discoverKubernetesContexts,
   extractAwsProfile,
+  inspectAgentConfigurationFile,
   inspectDirectory,
   writeExtractedKubeconfig,
 } from "../src/main/local-resources.js";
@@ -67,6 +68,55 @@ describe("local resource discovery", () => {
       join(configDirectory, "tui.json"),
     ]);
     expect(files.some(({ path }) => path.endsWith("auth.json"))).toBe(false);
+  });
+
+  it("discovers Claude Code settings without importing credentials or history", async () => {
+    const root = await temporaryRoot();
+    const configDirectory = join(root, ".claude");
+    await mkdir(configDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(configDirectory, "settings.json"), '{"hooks":{}}\n'),
+      writeFile(join(configDirectory, ".credentials.json"), '{"token":"no"}\n'),
+      writeFile(join(configDirectory, "history.jsonl"), '{}\n'),
+    ]);
+
+    const files = await discoverAgentConfigurationFiles(root);
+
+    expect(files).toHaveLength(1);
+    expect(files[0]).toMatchObject({
+      adapter: "claude-code",
+      destination: ".claude/settings.json",
+    });
+    expect(files[0]?.warnings.map(({ category }) => category)).toContain("hooks");
+  });
+
+  it("reports structured concerns without returning configuration values", async () => {
+    const root = await temporaryRoot();
+    const config = join(root, "settings.json");
+    await writeFile(
+      config,
+      JSON.stringify({
+        env: { API_TOKEN: "must-not-leak", AWS_PROFILE: "wrong-target" },
+        hooks: { PreToolUse: [{ command: "review-command" }] },
+        mcpServers: { tickets: { command: "ticket-mcp" } },
+        enabledPlugins: { example: true },
+      }),
+    );
+
+    const inspection = await inspectAgentConfigurationFile(config);
+
+    expect(inspection.warnings.map(({ category }) => category)).toEqual(
+      expect.arrayContaining([
+        "identity",
+        "credentials",
+        "hooks",
+        "mcp",
+        "plugins",
+      ]),
+    );
+    expect(JSON.stringify(inspection)).not.toContain("must-not-leak");
+    expect(JSON.stringify(inspection)).not.toContain("review-command");
+    expect(JSON.stringify(inspection)).not.toContain("wrong-target");
   });
 
   it("discovers AWS profiles and copies only the selected dependency chain", async () => {

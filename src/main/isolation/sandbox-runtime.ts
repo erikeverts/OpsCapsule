@@ -136,7 +136,7 @@ async function deniedUserDataRoots(): Promise<string[]> {
   return [];
 }
 
-async function assertPlatformDependencies(): Promise<void> {
+export async function checkSandboxRuntimeAvailability(): Promise<void> {
   if (process.platform === "darwin") {
     await access("/usr/bin/sandbox-exec", constants.X_OK);
     if (!(await findOnPath("rg"))) {
@@ -220,7 +220,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
   constructor(private readonly context: IsolationPreparationContext) {}
 
   async prepare(): Promise<PreparedIsolation> {
-    await assertPlatformDependencies();
+    await checkSandboxRuntimeAvailability();
     const nodeExecutable = await findOnPath("node");
     if (!nodeExecutable) {
       throw new Error(

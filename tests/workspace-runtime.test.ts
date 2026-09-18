@@ -32,6 +32,7 @@ describe("workspace runtime isolation", () => {
     const source = await registry.document("atlas");
     const manifest = structuredClone(source.manifest);
     manifest.metadata = { id: "managed-agent", name: "Managed Agent" };
+    manifest.agentInstructions = "# Operations\n\nVerify context before changes.\n";
     manifest.targets = manifest.targets.slice(0, 1);
     manifest.agentProfiles = [
       {
@@ -74,6 +75,15 @@ describe("workspace runtime isolation", () => {
     expect(await readFile(stagedConfig, "utf8")).toContain(
       '"provider":"example"',
     );
+    expect(await readFile(runtime.agentInstructions!, "utf8")).toContain(
+      "Verify context",
+    );
+    expect(
+      await readFile(join(runtime.home, ".config", "opencode", "AGENTS.md"), "utf8"),
+    ).toContain("Verify context");
+    expect(
+      buildWorkspaceEnvironment(runtime, target).OPSCAPSULE_AGENT_INSTRUCTIONS,
+    ).toBe(runtime.agentInstructions);
     expect(runtime.agentState).toBe(
       join(
         runtime.targetState,
@@ -86,6 +96,60 @@ describe("workspace runtime isolation", () => {
 
     await cleanupWorkspaceRuntime(runtime);
     expect(await readFile(sessionMarker, "utf8")).toBe("persistent\n");
+  });
+
+  it("materializes portable instructions into isolated Claude Code state", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-claude-"));
+    temporaryDirectories.push(baseDirectory);
+    const sourceConfig = join(baseDirectory, "settings.json");
+    await writeFile(sourceConfig, '{"model":"sonnet"}\n');
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = { id: "claude-agent", name: "Claude Agent" };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.agentInstructions = "# Workspace\n\nUse read-only checks first.\n";
+    manifest.agentProfiles = [
+      {
+        id: "claude",
+        name: "Claude Code",
+        adapter: "claude-code",
+        runtime: { command: "claude", args: [] },
+        configuration: {
+          files: [
+            {
+              source: sourceConfig,
+              destination: ".claude/settings.json",
+            },
+          ],
+        },
+        environment: {},
+      },
+    ];
+    manifest.defaultAgentProfile = "claude";
+    delete manifest.targets[0]!.agentProfile;
+    delete manifest.targets[0]!.agentRuntime;
+    await registry.create(manifest);
+
+    const target = await registry.resolveTarget("claude-agent", "development");
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "claude-session",
+      target,
+    );
+
+    expect(
+      await readFile(join(runtime.home, ".claude", "settings.json"), "utf8"),
+    ).toContain("sonnet");
+    expect(
+      await readFile(
+        join(runtime.agentState, "data", "claude", "CLAUDE.md"),
+        "utf8",
+      ),
+    ).toContain("Use read-only checks first");
+
+    await cleanupWorkspaceRuntime(runtime);
   });
 
   it("creates separate runtime homes, temp directories, and kubeconfigs", async () => {

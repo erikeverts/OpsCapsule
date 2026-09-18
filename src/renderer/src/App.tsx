@@ -4,6 +4,7 @@ import type {
   WorkspaceCatalogEntry,
   WorkspaceSession,
   WorkspaceTargetSummary,
+  TargetReadinessReport,
 } from "../../shared/contracts";
 import { TerminalPane } from "./components/TerminalPane";
 import { WorkspaceEditor } from "./components/WorkspaceEditor";
@@ -139,6 +140,8 @@ export function App() {
   const [startingKey, setStartingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorRoute | null>(null);
+  const [readiness, setReadiness] = useState<TargetReadinessReport | null>(null);
+  const [readinessError, setReadinessError] = useState<string | null>(null);
 
   useEffect(() => {
     window.opsCapsule
@@ -170,9 +173,37 @@ export function App() {
       : "";
   const selectedSession = sessions[activeKey];
 
+  useEffect(() => {
+    if (!selectedWorkspace || !selectedTarget) {
+      setReadiness(null);
+      return;
+    }
+    let cancelled = false;
+    setReadiness(null);
+    setReadinessError(null);
+    window.opsCapsule
+      .checkTargetReadiness(selectedWorkspace.id, selectedTarget.id)
+      .then((report) => {
+        if (!cancelled) {
+          setReadiness(report);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) {
+          setReadinessError(
+            reason instanceof Error ? reason.message : String(reason),
+          );
+        }
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [selectedTarget, selectedWorkspace]);
+
   function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
     setSelectedWorkspaceId(workspace.id);
     setSelectedTargetId(workspace.targets[0]?.id ?? "");
+    setReadiness(null);
     setError(null);
   }
 
@@ -336,7 +367,9 @@ export function App() {
                 ) : (
                   <button
                     className="primary-button"
-                    disabled={startingKey !== null}
+                    disabled={
+                      startingKey !== null || readiness?.status === "blocked"
+                    }
                     onClick={() =>
                       void startWorkspace(
                         selectedWorkspace.id,
@@ -360,6 +393,7 @@ export function App() {
                     key={target.id}
                     onClick={() => {
                       setSelectedTargetId(target.id);
+                      setReadiness(null);
                       setError(null);
                     }}
                     type="button"
@@ -398,6 +432,28 @@ export function App() {
                 </div>
                 <h2>Launch the {selectedTarget.name} target</h2>
                 <p>{selectedWorkspace.description}</p>
+                <div className="readiness-report">
+                  <header>
+                    <strong>Target readiness</strong>
+                    <span className={`readiness-summary ${readiness?.status ?? "checking"}`}>
+                      {readiness?.status ?? "checking"}
+                    </span>
+                  </header>
+                  {readiness?.checks.map((check) => (
+                    <div className="readiness-check" key={check.id}>
+                      <span className={`readiness-dot ${check.status}`} />
+                      <strong>{check.label}</strong>
+                      <small>{check.detail}</small>
+                    </div>
+                  ))}
+                  {readinessError ? (
+                    <div className="readiness-check">
+                      <span className="readiness-dot fail" />
+                      <strong>Readiness unavailable</strong>
+                      <small>{readinessError}</small>
+                    </div>
+                  ) : null}
+                </div>
                 <div className="permission-preview">
                   {selectedTarget.directories.map((directory) => (
                     <div key={directory.id}>
@@ -408,7 +464,9 @@ export function App() {
                 </div>
                 <button
                   className="primary-button"
-                  disabled={startingKey !== null}
+                  disabled={
+                    startingKey !== null || readiness?.status === "blocked"
+                  }
                   onClick={() =>
                     void startWorkspace(
                       selectedWorkspace.id,

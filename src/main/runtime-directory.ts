@@ -19,7 +19,10 @@ import { stringify } from "yaml";
 import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
-import { extractKubeconfigContext } from "./local-resources.js";
+import {
+  extractKubeconfigContext,
+  inspectAgentConfigurationFile,
+} from "./local-resources.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 import { resolveConfiguredPath } from "./workspace-registry.js";
 
@@ -184,6 +187,7 @@ async function prepareAgentState(
   home: string,
   agentState: string,
   resolvedTarget: ResolvedWorkspaceTarget,
+  agentInstructions?: string,
 ): Promise<void> {
   await assertStateDirectory(agentState);
   await Promise.all(
@@ -193,43 +197,66 @@ async function prepareAgentState(
   );
 
   const { profile } = resolvedTarget.agent;
-  if (profile.configuration.files.length === 0) {
-    return;
+  if (profile.configuration.files.length > 0) {
+    const workspaceRoot = dirname(resolvedTarget.workspace.sourcePath);
+    const resourceRoot = await realpath(
+      join(workspaceRoot, "resources", "agents", profile.id),
+    );
+    const canonicalHome = await realpath(home);
+    for (const file of profile.configuration.files) {
+      const source = await realpath(
+        resolveConfiguredPath(file.source, resolvedTarget.workspace.sourcePath),
+      );
+      assertContainedPath(
+        resourceRoot,
+        source,
+        `Agent profile '${profile.id}' configuration source '${file.source}'`,
+      );
+      const sourceInfo = await lstat(source);
+      if (!sourceInfo.isFile()) {
+        throw new Error(
+          `Agent profile '${profile.id}' configuration source '${file.source}' is not a regular file`,
+        );
+      }
+      const inspection = await inspectAgentConfigurationFile(source);
+      if (inspection.warnings.some(({ category }) => category === "identity")) {
+        throw new Error(
+          `Agent profile '${profile.id}' configuration source '${file.source}' may override capsule-managed identity or isolation paths`,
+        );
+      }
+
+      const destination = resolve(
+        canonicalHome,
+        ...file.destination.replaceAll("\\", "/").split("/"),
+      );
+      assertContainedPath(
+        canonicalHome,
+        destination,
+        `Agent profile '${profile.id}' configuration destination '${file.destination}'`,
+      );
+      await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+      await copyFile(source, destination);
+      await chmod(destination, 0o600);
+    }
   }
 
-  const workspaceRoot = dirname(resolvedTarget.workspace.sourcePath);
-  const resourceRoot = await realpath(
-    join(workspaceRoot, "resources", "agents", profile.id),
-  );
-  const canonicalHome = await realpath(home);
-  for (const file of profile.configuration.files) {
-    const source = await realpath(
-      resolveConfiguredPath(file.source, resolvedTarget.workspace.sourcePath),
-    );
-    assertContainedPath(
-      resourceRoot,
-      source,
-      `Agent profile '${profile.id}' configuration source '${file.source}'`,
-    );
-    const sourceInfo = await lstat(source);
-    if (!sourceInfo.isFile()) {
-      throw new Error(
-        `Agent profile '${profile.id}' configuration source '${file.source}' is not a regular file`,
-      );
-    }
-
-    const destination = resolve(
-      canonicalHome,
-      ...file.destination.replaceAll("\\", "/").split("/"),
-    );
-    assertContainedPath(
-      canonicalHome,
-      destination,
-      `Agent profile '${profile.id}' configuration destination '${file.destination}'`,
-    );
+  if (profile.adapter === "opencode" && agentInstructions) {
+    const destination = join(home, ".config", "opencode", "AGENTS.md");
     await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-    await copyFile(source, destination);
+    await copyFile(agentInstructions, destination);
     await chmod(destination, 0o600);
+  }
+
+  if (profile.adapter === "claude-code") {
+    const claudeState = join(agentState, "data", "claude");
+    const destination = join(claudeState, "CLAUDE.md");
+    await assertStateDirectory(claudeState);
+    if (agentInstructions) {
+      await copyFile(agentInstructions, destination);
+      await chmod(destination, 0o600);
+    } else {
+      await rm(destination, { force: true });
+    }
   }
 }
 
@@ -294,6 +321,9 @@ export async function createWorkspaceRuntime(
   );
   const kubeconfig = join(root, "kubeconfig.yaml");
   const sandboxConfig = join(root, "sandbox.json");
+  const agentInstructions = resolvedTarget.workspace.manifest.agentInstructions
+    ? join(root, "agent-instructions.md")
+    : undefined;
   const targetState = join(
     baseDirectory,
     "state",
@@ -314,8 +344,15 @@ export async function createWorkspaceRuntime(
     mkdir(dirname(targetState), { recursive: true, mode: 0o700 }),
   ]);
   await assertStateDirectory(targetState);
+  if (agentInstructions) {
+    await writeFile(
+      agentInstructions,
+      resolvedTarget.workspace.manifest.agentInstructions!,
+      { encoding: "utf8", mode: 0o600 },
+    );
+  }
   await prepareCloudState(home, targetState, resolvedTarget);
-  await prepareAgentState(home, agentState, resolvedTarget);
+  await prepareAgentState(home, agentState, resolvedTarget, agentInstructions);
   await Promise.all([
     writeKubeconfig(kubeconfig, resolvedTarget),
     writeShellConfiguration(
@@ -333,6 +370,7 @@ export async function createWorkspaceRuntime(
     sandboxConfig,
     targetState,
     agentState,
+    ...(agentInstructions ? { agentInstructions } : {}),
   };
 }
 
@@ -402,6 +440,9 @@ export function buildWorkspaceEnvironment(
     OPSCAPSULE_WORKSPACE: resolvedTarget.workspace.manifest.metadata.id,
     OPSCAPSULE_TARGET: resolvedTarget.target.id,
     OPSCAPSULE_ENVIRONMENT: resolvedTarget.target.environment,
+    ...(runtime.agentInstructions
+      ? { OPSCAPSULE_AGENT_INSTRUCTIONS: runtime.agentInstructions }
+      : {}),
     ...(resolvedTarget.kubernetes
       ? {
           OPSCAPSULE_CLUSTER: resolvedTarget.kubernetes.source.context,

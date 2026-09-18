@@ -19,6 +19,11 @@ metadata:
   id: example
   name: Example workspace
 
+agentInstructions: |
+  # Operating guidance
+  Verify the selected target identity before making changes.
+  Prefer read-only inspection before mutation.
+
 agentProfiles:
   - id: opencode-bedrock
     name: OpenCode on Bedrock
@@ -45,6 +50,18 @@ agentProfiles:
       files: []
     environment:
       CUSTOM_AGENT_MODE: interactive
+
+  - id: claude-code
+    name: Claude Code
+    adapter: claude-code
+    runtime:
+      command: claude
+      args: []
+    configuration:
+      files:
+        - source: resources/agents/claude-code/settings.json
+          destination: .claude/settings.json
+    environment: {}
 
 defaultAgentProfile: opencode-bedrock
 
@@ -116,7 +133,7 @@ be unique.
 | --- | --- | --- |
 | `id` | yes | Stable reference used by defaults, targets, resources, and state. |
 | `name` | yes | Human-readable label. |
-| `adapter` | yes | Adapter registry id. Initial values are `opencode` and `command`. |
+| `adapter` | yes | Adapter registry id. Initial values are `opencode`, `claude-code`, and `command`. |
 | `runtime.command` | yes | Executable name or absolute executable path. |
 | `runtime.args` | no | Literal argument list; defaults to `[]`. |
 | `configuration.files` | no | Managed files staged below the synthetic home; defaults to `[]`. |
@@ -158,8 +175,25 @@ to the locations supported by that agent. A mapping grants no additional host
 filesystem access.
 
 Workspace Studio may initially offer adapter-specific import choices, such as the
-OpenCode settings and TUI files. It saves only managed paths; the original host
-path is import-time information and is not retained as a runtime dependency.
+OpenCode settings and TUI files or Claude Code `settings.json`. OpenCode
+destinations are restricted to those two settings files; Claude Code is restricted
+to `.claude/settings.json`. Credential stores, history, and directories are not
+offered. The editor saves only managed paths; the original host path is
+import-time information and is not retained as a runtime dependency.
+
+Before save and in the target-readiness report, OpsCapsule conservatively scans
+configuration keys for target-identity overrides, credentials, hooks, plugins,
+and MCP declarations. Only warning categories and messages cross into the
+renderer; configuration values do not. A detected identity override blocks
+launch; other findings require review. A clean scan is not a security guarantee.
+
+### `agentInstructions`
+
+An optional workspace-level Markdown string containing portable, non-secret
+operating guidance. It applies to every target and stays independent of the
+selected profile. OpenCode receives it as global `AGENTS.md`; Claude Code receives
+it as `CLAUDE.md` in its isolated configuration directory; a generic command can
+read the canonical file named by `OPSCAPSULE_AGENT_INSTRUCTIONS`.
 
 ### `defaultAgentProfile`
 
@@ -186,9 +220,11 @@ A manifest is invalid when:
 - a managed source or destination is unsafe; or
 - two mappings in one profile write the same destination.
 
-Adapter availability, executable resolution, and file existence are readiness
-concerns because they depend on the machine running OpsCapsule. They do not make
-the portable YAML structurally invalid.
+Adapter availability, executable resolution, file existence, directory access,
+and sandbox dependencies are readiness concerns because they depend on the
+machine running OpsCapsule. They do not make the portable YAML structurally
+invalid. Warnings are visible before launch; blocking checks are repeated on the
+authoritative launch path.
 
 ## Managed and mutable paths
 
@@ -212,7 +248,7 @@ state root. No mutable state path is configurable as an arbitrary host path.
 This iteration does not define:
 
 - secret values or a credential broker;
-- workspace metadata, reference documents, instructions, or curated memory;
+- workspace metadata, reference documents, scoped instructions, or curated memory;
 - normalized MCP server resources or tool permissions;
 - shared history across targets;
 - agent plugin installation or synchronization;
