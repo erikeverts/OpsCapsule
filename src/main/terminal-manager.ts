@@ -1,5 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
 import * as pty from "node-pty";
 import type {
   RuntimePaths,
@@ -8,13 +7,11 @@ import type {
   TerminalExitEvent,
   WorkspaceSession,
 } from "../shared/contracts.js";
+import type { ExecutionHost } from "./hosts/types.js";
 import type { PreparedIsolation } from "./isolation/types.js";
 import { CommandRuntimeAdapter } from "./runtime-adapters/command.js";
 import type { ProcessLaunchSpec } from "./runtime-adapters/types.js";
-import {
-  buildWorkspaceEnvironment,
-  cleanupWorkspaceRuntime,
-} from "./runtime-directory.js";
+import type { CapsuleRuntime } from "./runtime-directory.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 
 interface TerminalRecord {
@@ -38,7 +35,10 @@ export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
 
-  constructor(private readonly events: TerminalEvents) {}
+  constructor(
+    private readonly host: ExecutionHost,
+    private readonly events: TerminalEvents,
+  ) {}
 
   createSessionId(): string {
     return randomUUID();
@@ -47,11 +47,10 @@ export class TerminalManager {
   async startWorkspace(
     sessionId: string,
     resolvedTarget: ResolvedWorkspaceTarget,
-    runtime: RuntimePaths,
+    capsule: CapsuleRuntime,
     isolation: PreparedIsolation,
   ): Promise<WorkspaceSession> {
-    const environment = buildWorkspaceEnvironment(runtime, resolvedTarget);
-    const cwd = await realpath(resolvedTarget.defaultDirectory.path);
+    const { runtime, environment, workingDirectory: cwd } = capsule;
     const shellDefinition = {
       adapter: "command" as const,
       command: "$SHELL",
@@ -98,6 +97,7 @@ export class TerminalManager {
       target: resolvedTarget.summary,
       runtime,
       isolation: isolation.effective,
+      host: { id: this.host.id, label: this.host.label },
       terminals,
     };
   }
@@ -143,7 +143,7 @@ export class TerminalManager {
       this.terminals.delete(terminalId);
     }
     this.sessions.delete(sessionId);
-    await cleanupWorkspaceRuntime(session.runtime);
+    await this.host.cleanupRuntime(session.runtime);
   }
 
   async stopAll(): Promise<void> {
@@ -157,12 +157,13 @@ export class TerminalManager {
     terminalId: string,
     launchSpec: ProcessLaunchSpec,
   ): void {
-    const process = pty.spawn(launchSpec.command, launchSpec.args, {
+    const launch = this.host.launch(launchSpec);
+    const process = pty.spawn(launch.file, launch.args, {
       name: "xterm-256color",
       cols: 100,
       rows: 28,
-      cwd: launchSpec.cwd,
-      env: launchSpec.env,
+      cwd: launch.cwd,
+      env: launch.env,
     });
 
     const terminalRecord: TerminalRecord = {

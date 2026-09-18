@@ -4,6 +4,7 @@ import type { PreparedIsolation } from "./types.js";
 
 export class ContextOnlyIsolation implements PreparedIsolation {
   readonly effective: EffectiveIsolation;
+  readonly launcher = null;
 
   constructor(
     readOnlyPaths: string[],

@@ -6,8 +6,10 @@ import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
 import type { EffectiveIsolation } from "../../shared/contracts.js";
 import type { ProcessLaunchSpec } from "../runtime-adapters/types.js";
+import { wrapLaunchSpec } from "./launcher.js";
 import type {
   IsolationBackend,
+  IsolationLauncher,
   IsolationPreparationContext,
   PreparedIsolation,
 } from "./types.js";
@@ -172,17 +174,18 @@ async function assertPlatformDependencies(): Promise<void> {
     return;
   }
   throw new Error(
-    "Enforced isolation is not enabled on Windows in this iteration; use context-only mode explicitly",
+    `Enforced isolation is not supported on ${process.platform}; capsule processes must run on macOS, Linux, or Linux inside WSL`,
   );
 }
 
 class PreparedSandboxRuntimeIsolation implements PreparedIsolation {
   readonly effective: EffectiveIsolation;
+  readonly launcher: IsolationLauncher;
 
   constructor(
-    private readonly nodeExecutable: string,
-    private readonly runnerPath: string,
-    private readonly configPath: string,
+    nodeExecutable: string,
+    runnerPath: string,
+    configPath: string,
     readOnlyPaths: string[],
     readWritePaths: string[],
     networkMode: EffectiveIsolation["networkMode"],
@@ -194,23 +197,21 @@ class PreparedSandboxRuntimeIsolation implements PreparedIsolation {
       readWritePaths,
       networkMode,
     };
+    this.launcher = {
+      command: nodeExecutable,
+      args: [
+        runnerPath,
+        "--settings",
+        configPath,
+        "--network-mode",
+        networkMode,
+        "--",
+      ],
+    };
   }
 
   wrap(launchSpec: ProcessLaunchSpec): ProcessLaunchSpec {
-    return {
-      ...launchSpec,
-      command: this.nodeExecutable,
-      args: [
-        this.runnerPath,
-        "--settings",
-        this.configPath,
-        "--network-mode",
-        this.effective.networkMode,
-        "--",
-        launchSpec.command,
-        ...launchSpec.args,
-      ],
-    };
+    return wrapLaunchSpec(this.launcher, launchSpec);
   }
 }
 

@@ -25,8 +25,9 @@ extracted single-context kubeconfig. All three PTYs use the same isolation polic
 
 Enforced isolation is implemented behind an OpsCapsule interface using the pinned
 Anthropic Sandbox Runtime research preview. It wraps arbitrary commands and is not
-an agent integration. It currently uses macOS Seatbelt and Linux Bubblewrap;
-Windows enforcement remains disabled until its alpha backend is evaluated.
+an agent integration. It currently uses macOS Seatbelt and Linux Bubblewrap. On
+Windows, capsule processes run inside WSL 2 and use the Linux backend; see
+[ADR 0006](0006-windows-wsl-execution-host.md).
 
 The application fails closed when enforced isolation is unavailable. Context-only
 execution is possible only when explicitly selected in trusted configuration.

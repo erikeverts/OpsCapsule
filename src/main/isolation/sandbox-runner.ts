@@ -51,7 +51,7 @@ function quoteForPosixShell(argument: string): string {
 async function run(): Promise<void> {
   if (process.platform === "win32") {
     throw new Error(
-      "Enforced isolation is not enabled on Windows in this iteration",
+      "The sandbox runner must execute inside a Linux (WSL) or macOS environment",
     );
   }
 
