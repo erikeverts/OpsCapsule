@@ -1,5 +1,6 @@
 {
   "name": "opscapsule",
+  "productName": "OpsCapsule",
   "version": "0.4.0",
   "private": true,
   "description": "An isolated workspace for operations tooling and agent runtimes.",

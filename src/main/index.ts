@@ -30,6 +30,8 @@ import {
   inspectDirectory,
 } from "./local-resources.js";
 
+app.setName("OpsCapsule");
+
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
