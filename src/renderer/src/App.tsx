@@ -279,6 +279,7 @@ export function App() {
     <main
       className={`app-shell ${production && !editor ? "production-active" : ""}`}
     >
+      <div className="window-drag-region" aria-hidden="true" />
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
