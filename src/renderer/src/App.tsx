@@ -219,6 +219,19 @@ export function App() {
     setError(null);
   }
 
+  async function workspaceDeleted(workspaceId: string): Promise<void> {
+    const loadedCatalog = await window.opsCapsule.listWorkspaces();
+    const nextWorkspace = loadedCatalog.workspaces.find(
+      ({ id }) => id !== workspaceId,
+    );
+    setCatalog(loadedCatalog);
+    setSelectedWorkspaceId(nextWorkspace?.id ?? "");
+    setSelectedTargetId(nextWorkspace?.targets[0]?.id ?? "");
+    setReadiness(null);
+    setEditor(null);
+    setError(null);
+  }
+
   async function startWorkspace(
     workspaceId: string,
     targetId: string,
@@ -319,6 +332,7 @@ export function App() {
           <WorkspaceEditor
             mode={editor.mode}
             onCancel={() => setEditor(null)}
+            onDeleted={workspaceDeleted}
             onSaved={workspaceSaved}
             workspaceId={editor.mode === "edit" ? editor.workspaceId : undefined}
           />
@@ -499,9 +513,11 @@ export function App() {
         ) : (
           <section className="empty-state">
             <h2>
-              {catalog && catalog.errors.length > 0
-                ? "No valid workspace manifests"
-                : "Loading workspaces…"}
+              {!catalog
+                ? "Loading workspaces…"
+                : catalog.errors.length > 0
+                  ? "No valid workspace manifests"
+                  : "No workspaces configured"}
             </h2>
             {catalog ? <code>{catalog.configDirectory}</code> : null}
           </section>

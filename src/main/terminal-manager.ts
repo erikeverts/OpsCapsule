@@ -27,6 +27,7 @@ interface TerminalRecord {
 }
 
 interface SessionRecord {
+  workspaceId: string;
   terminalIds: Set<string>;
   runtime: RuntimePaths;
 }
@@ -47,6 +48,12 @@ export class TerminalManager {
 
   createSessionId(): string {
     return randomUUID();
+  }
+
+  hasActiveWorkspace(workspaceId: string): boolean {
+    return [...this.sessions.values()].some(
+      (session) => session.workspaceId === workspaceId,
+    );
   }
 
   async startWorkspace(
@@ -72,7 +79,11 @@ export class TerminalManager {
       { id: randomUUID(), title: "Shell B", kind: "shell" },
     ];
 
-    this.sessions.set(sessionId, { terminalIds: new Set(), runtime });
+    this.sessions.set(sessionId, {
+      workspaceId: resolvedTarget.workspace.manifest.metadata.id,
+      terminalIds: new Set(),
+      runtime,
+    });
 
     try {
       for (const terminal of terminals) {

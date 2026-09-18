@@ -38,6 +38,7 @@ interface WorkspaceEditorProps {
   mode: "create" | "edit";
   workspaceId?: string;
   onCancel: () => void;
+  onDeleted: (workspaceId: string) => Promise<void> | void;
   onSaved: (workspaceId: string) => Promise<void> | void;
 }
 
@@ -262,6 +263,7 @@ export function WorkspaceEditor({
   mode,
   workspaceId,
   onCancel,
+  onDeleted,
   onSaved,
 }: WorkspaceEditorProps) {
   const [document, setDocument] = useState<WorkspaceDocument | null>(null);
@@ -276,6 +278,7 @@ export function WorkspaceEditor({
   const [section, setSection] = useState<EditorSection>("general");
   const [loading, setLoading] = useState(mode === "edit");
   const [saving, setSaving] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [localResources, setLocalResources] = useState<LocalResourceOptions>({
     awsProfiles: [],
@@ -526,7 +529,7 @@ export function WorkspaceEditor({
   }
 
   async function save(): Promise<void> {
-    if (!draft || validationError || saving) {
+    if (!draft || validationError || saving || deleting) {
       return;
     }
     setSaving(true);
@@ -553,6 +556,36 @@ export function WorkspaceEditor({
       setError(describeValidationError(reason));
     } finally {
       setSaving(false);
+    }
+  }
+
+  async function deleteWorkspace(): Promise<void> {
+    if (
+      mode !== "edit" ||
+      !workspaceId ||
+      !document ||
+      saving ||
+      deleting
+    ) {
+      return;
+    }
+    const confirmed = window.confirm(
+      `Delete workspace "${document.manifest.metadata.name}"?\n\n` +
+        "This permanently removes its manifest, imported configuration copies, and target-specific OpsCapsule state. Referenced project folders and repositories will not be deleted.",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setDeleting(true);
+    setError(null);
+    try {
+      await window.opsCapsule.deleteWorkspace(workspaceId, document.revision);
+      await onDeleted(workspaceId);
+    } catch (reason) {
+      setError(describeValidationError(reason));
+    } finally {
+      setDeleting(false);
     }
   }
 
@@ -585,13 +618,31 @@ export function WorkspaceEditor({
           </p>
         </div>
         <div className="header-actions">
-          <button className="secondary-button" onClick={cancel} type="button">
+          {mode === "edit" ? (
+            <button
+              className="danger-button"
+              disabled={saving || deleting}
+              onClick={() => void deleteWorkspace()}
+              type="button"
+            >
+              {deleting ? "Deleting…" : "Delete workspace"}
+            </button>
+          ) : null}
+          <button
+            className="secondary-button"
+            disabled={saving || deleting}
+            onClick={cancel}
+            type="button"
+          >
             Cancel
           </button>
           <button
             className="primary-button"
             disabled={
-              Boolean(validationError) || saving || (!dirty && mode === "edit")
+              Boolean(validationError) ||
+              saving ||
+              deleting ||
+              (!dirty && mode === "edit")
             }
             onClick={() => void save()}
             type="button"

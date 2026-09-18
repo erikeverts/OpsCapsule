@@ -304,6 +304,12 @@ button {
   box-shadow: 0 0 7px rgb(114 212 156 / 60%);
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
 .eyebrow {
   display: flex;
   align-items: center;
@@ -324,7 +330,8 @@ button {
 }
 
 .primary-button,
-.secondary-button {
+.secondary-button,
+.danger-button {
   min-height: 36px;
   padding: 0 15px;
   border-radius: 8px;
@@ -333,7 +340,8 @@ button {
   cursor: pointer;
 }
 
-.secondary-button:disabled {
+.secondary-button:disabled,
+.danger-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
 }
@@ -358,6 +366,18 @@ button {
   border: 1px solid #33464f;
   color: #aabcc4;
   background: #121d24;
+}
+
+.danger-button {
+  border: 1px solid #744747;
+  color: #e8a29b;
+  background: #241717;
+}
+
+.danger-button:hover:not(:disabled) {
+  border-color: #a65d58;
+  color: #ffc0ba;
+  background: #321c1c;
 }
 
 .context-strip {

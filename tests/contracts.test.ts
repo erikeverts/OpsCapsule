@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  deleteWorkspaceInput,
   startWorkspaceInput,
   terminalAttachmentInput,
   terminalResizeInput,
@@ -29,6 +30,18 @@ describe("IPC contracts", () => {
         terminalId: "terminal",
       }),
     ).toEqual({ sessionId: "session", terminalId: "terminal" });
+  });
+
+  it("requires a workspace revision for deletion", () => {
+    expect(
+      deleteWorkspaceInput.parse({
+        workspaceId: "atlas",
+        revision: "revision",
+      }),
+    ).toEqual({ workspaceId: "atlas", revision: "revision" });
+    expect(() =>
+      deleteWorkspaceInput.parse({ workspaceId: "atlas", revision: "" }),
+    ).toThrow();
   });
 
   it("rejects malformed renderer input", () => {

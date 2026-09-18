@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -206,6 +206,60 @@ describe("workspace registry", () => {
     await expect(
       registry.save("atlas", document.revision, document.manifest),
     ).rejects.toThrow("cannot be changed");
+  });
+
+  it("deletes managed workspace data without touching referenced directories", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    const projectPath = document.manifest.directories[0]!.path;
+    const projectMarker = join(projectPath, "keep.txt");
+    const statePath = join(registry.stateDirectory, "atlas", "targets", "development");
+    await writeFile(projectMarker, "keep\n");
+    await mkdir(statePath, { recursive: true });
+    await writeFile(join(statePath, "state.json"), "{}\n");
+
+    await registry.deleteWorkspace("atlas", document.revision);
+
+    await expect(stat(document.sourcePath)).rejects.toMatchObject({ code: "ENOENT" });
+    await expect(stat(join(registry.stateDirectory, "atlas"))).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+    expect(await readFile(projectMarker, "utf8")).toBe("keep\n");
+    expect((await registry.catalog()).workspaces.some(({ id }) => id === "atlas"))
+      .toBe(false);
+  });
+
+  it("does not delete a workspace that changed after it was opened", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const document = await registry.document("atlas");
+    await writeFile(
+      document.sourcePath,
+      `${document.yaml}\n# changed outside OpsCapsule\n`,
+      "utf8",
+    );
+
+    await expect(
+      registry.deleteWorkspace("atlas", document.revision),
+    ).rejects.toThrow("changed on disk");
+    expect((await registry.document("atlas")).manifest.metadata.id).toBe("atlas");
+  });
+
+  it("does not restore examples after every workspace is deleted", async () => {
+    const root = await temporaryRoot();
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    for (const workspace of (await registry.catalog()).workspaces) {
+      const document = await registry.document(workspace.id);
+      await registry.deleteWorkspace(workspace.id, document.revision);
+    }
+
+    await registry.initialize();
+
+    expect((await registry.catalog()).workspaces).toEqual([]);
   });
 
   it("migrates a legacy flat manifest without changing relative directory meaning", async () => {

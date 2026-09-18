@@ -219,6 +219,11 @@ export const saveWorkspaceInput = z.object({
   manifest: z.unknown(),
 });
 
+export const deleteWorkspaceInput = z.object({
+  workspaceId: z.string().min(1),
+  revision: z.string().min(1),
+});
+
 export const choosePathInput = z.object({
   kind: z.enum(["directory", "file"]),
 });
@@ -263,6 +268,7 @@ export interface OpsCapsuleApi {
     revision: string,
     manifest: WorkspaceManifest,
   ): Promise<WorkspaceDocument>;
+  deleteWorkspace(workspaceId: string, revision: string): Promise<void>;
   choosePath(kind: "directory" | "file"): Promise<string | null>;
   inspectDirectory(path: string): Promise<DirectoryInspection>;
   inspectAgentConfiguration(

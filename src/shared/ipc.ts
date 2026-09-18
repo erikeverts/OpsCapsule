@@ -3,6 +3,7 @@ export const IPC = {
   getWorkspace: "workspace:get",
   createWorkspace: "workspace:create",
   saveWorkspace: "workspace:save",
+  deleteWorkspace: "workspace:delete",
   choosePath: "workspace:choose-path",
   inspectDirectory: "workspace:inspect-directory",
   inspectAgentConfiguration: "workspace:inspect-agent-configuration",

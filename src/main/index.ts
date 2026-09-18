@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
+  deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
   saveWorkspaceInput,
@@ -54,6 +55,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.saveWorkspace, (_event, input: unknown) => {
     const { workspaceId, revision, manifest } = saveWorkspaceInput.parse(input);
     return workspaceRegistry.save(workspaceId, revision, manifest);
+  });
+
+  ipcMain.handle(IPC.deleteWorkspace, async (_event, input: unknown) => {
+    const { workspaceId, revision } = deleteWorkspaceInput.parse(input);
+    if (terminalManager.hasActiveWorkspace(workspaceId)) {
+      throw new Error("Stop every capsule in this workspace before deleting it");
+    }
+    await workspaceRegistry.deleteWorkspace(workspaceId, revision);
   });
 
   ipcMain.handle(IPC.choosePath, async (_event, input: unknown) => {
