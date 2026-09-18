@@ -223,9 +223,11 @@ export function App() {
   }, [selectedTarget, selectedWorkspace]);
 
   function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
+    if (workspace.id === selectedWorkspaceId) {
+      return;
+    }
     setSelectedWorkspaceId(workspace.id);
     setSelectedTargetId(workspace.targets[0]?.id ?? "");
-    setReadiness(null);
     setError(null);
   }
 
@@ -431,8 +433,10 @@ export function App() {
                     className={target.id === selectedTarget.id ? "selected" : ""}
                     key={target.id}
                     onClick={() => {
+                      if (target.id === selectedTarget.id) {
+                        return;
+                      }
                       setSelectedTargetId(target.id);
-                      setReadiness(null);
                       setError(null);
                     }}
                     type="button"
