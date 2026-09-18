@@ -18,6 +18,8 @@ const api: OpsCapsuleApi = {
       revision,
       manifest,
     }),
+  deleteWorkspace: (workspaceId, revision) =>
+    ipcRenderer.invoke(IPC.deleteWorkspace, { workspaceId, revision }),
   choosePath: (kind) => ipcRenderer.invoke(IPC.choosePath, { kind }),
   inspectDirectory: (path) =>
     ipcRenderer.invoke(IPC.inspectDirectory, { path }),

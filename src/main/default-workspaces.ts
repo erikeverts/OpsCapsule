@@ -190,8 +190,18 @@ export async function seedDefaultWorkspaces(
   demoRoot: string,
 ): Promise<void> {
   await mkdir(configDirectory, { recursive: true });
+  const seedMarker = join(configDirectory, ".examples-initialized");
   const existingFiles = await readdir(configDirectory);
   if (existingFiles.length > 0) {
+    await writeFile(seedMarker, "", {
+      encoding: "utf8",
+      flag: "wx",
+      mode: 0o600,
+    }).catch((error: NodeJS.ErrnoException) => {
+      if (error.code !== "EEXIST") {
+        throw error;
+      }
+    });
     return;
   }
 
@@ -243,4 +253,10 @@ export async function seedDefaultWorkspaces(
       });
     }),
   );
+
+  await writeFile(seedMarker, "", {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
 }

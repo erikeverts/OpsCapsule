@@ -122,6 +122,7 @@ export function resolveConfiguredPath(
 
 export class WorkspaceRegistry {
   readonly configDirectory: string;
+  readonly stateDirectory: string;
   private readonly demoRoot: string;
 
   constructor(
@@ -129,6 +130,7 @@ export class WorkspaceRegistry {
     private readonly cloudAdapters = new CloudAdapterRegistry(),
   ) {
     this.configDirectory = join(baseDirectory, "config", "workspaces");
+    this.stateDirectory = join(baseDirectory, "state", "workspaces");
     this.demoRoot = join(baseDirectory, "demo-workspaces");
   }
 
@@ -250,6 +252,38 @@ export class WorkspaceRegistry {
       revision: contentRevision(yaml),
       yaml,
     };
+  }
+
+  async deleteWorkspace(
+    workspaceId: string,
+    expectedRevision: string,
+  ): Promise<void> {
+    const workspace = await this.findWorkspace(workspaceId);
+    const currentYaml = await readFile(workspace.sourcePath, "utf8");
+    if (contentRevision(currentYaml) !== expectedRevision) {
+      throw new Error(
+        "This workspace changed on disk after it was opened. Reload it before deleting so a newer configuration is not removed.",
+      );
+    }
+
+    const managedSourcePath = join(
+      this.configDirectory,
+      workspaceId,
+      "workspace.yaml",
+    );
+    const workspaceConfiguration =
+      workspace.sourcePath === managedSourcePath
+        ? dirname(workspace.sourcePath)
+        : workspace.sourcePath;
+
+    await rm(workspaceConfiguration, {
+      recursive: workspace.sourcePath === managedSourcePath,
+      force: false,
+    });
+    await rm(join(this.stateDirectory, workspaceId), {
+      recursive: true,
+      force: true,
+    });
   }
 
   async resolveTarget(

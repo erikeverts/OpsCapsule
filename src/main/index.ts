@@ -3,6 +3,7 @@ import { app, BrowserWindow, dialog, ipcMain } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
+  deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
   saveWorkspaceInput,
@@ -29,6 +30,8 @@ import {
   inspectDirectory,
 } from "./local-resources.js";
 
+app.setName("OpsCapsule");
+
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
@@ -54,6 +57,14 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.saveWorkspace, (_event, input: unknown) => {
     const { workspaceId, revision, manifest } = saveWorkspaceInput.parse(input);
     return workspaceRegistry.save(workspaceId, revision, manifest);
+  });
+
+  ipcMain.handle(IPC.deleteWorkspace, async (_event, input: unknown) => {
+    const { workspaceId, revision } = deleteWorkspaceInput.parse(input);
+    if (terminalManager.hasActiveWorkspace(workspaceId)) {
+      throw new Error("Stop every capsule in this workspace before deleting it");
+    }
+    await workspaceRegistry.deleteWorkspace(workspaceId, revision);
   });
 
   ipcMain.handle(IPC.choosePath, async (_event, input: unknown) => {
@@ -149,12 +160,20 @@ function registerIpcHandlers(): void {
 }
 
 async function createWindow(): Promise<void> {
+  const applicationIcon = join(
+    app.getAppPath(),
+    "assets",
+    "icons",
+    "png",
+    "256x256.png",
+  );
   mainWindow = new BrowserWindow({
     width: 1500,
     height: 940,
     minWidth: 1000,
     minHeight: 650,
     backgroundColor: "#0b1117",
+    icon: applicationIcon,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -188,6 +207,11 @@ app.whenReady().then(async () => {
     return;
   }
   await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
+  if (process.platform === "darwin") {
+    app.dock?.setIcon(
+      join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
+    );
+  }
   workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
   await workspaceRegistry.initialize();
   registerIpcHandlers();

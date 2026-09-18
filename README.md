@@ -71,6 +71,11 @@ npm install
 npm run dev
 ```
 
+On macOS, the development command runs inside the dependency's `Electron.app`
+bundle. The Dock icon is replaced at runtime, but Stage Manager and some window
+previews may still show Electron's bundle icon. A packaged `OpsCapsule.app` will
+use the supplied `assets/icons/macos/OpsCapsule.icns` throughout.
+
 Useful checks:
 
 ```sh

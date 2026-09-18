@@ -12,6 +12,12 @@ database representation. OpsCapsule validates the full manifest before saving,
 writes replacements atomically, and rejects a save if another process changed the
 file after it was opened.
 
+Deleting a workspace removes its managed manifest directory, imported resource
+copies, and target-specific OpsCapsule state. Referenced project directories and
+repositories are never deleted. A workspace cannot be deleted while one of its
+capsules is running, and an external manifest change must be reviewed before the
+delete can be retried.
+
 The editor discovers local AWS profiles and Kubernetes contexts. Saving imports
 the selected configuration under the workspace's mode-restricted `resources`
 directory. AWS access-key fields are removed, and shared credentials, SSO tokens,

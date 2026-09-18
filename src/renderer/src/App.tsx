@@ -78,13 +78,35 @@ function ContextStrip({ target }: { target: WorkspaceTargetSummary }) {
           {target.agent.name} · {target.agent.adapter}
         </strong>
       </div>
-      <div>
+      <div
+        aria-describedby="filesystem-root-details"
+        className="context-filesystem"
+        tabIndex={0}
+      >
         <span>Filesystem</span>
         <strong>
           {target.isolationMode === "enforced"
             ? `${target.directories.length} roots enforced`
             : "Context only"}
         </strong>
+        <div
+          className="context-tooltip"
+          id="filesystem-root-details"
+          role="tooltip"
+        >
+          <span className="context-tooltip-title">Configured roots</span>
+          {target.directories.map((directory) => (
+            <div className="context-tooltip-root" key={directory.id}>
+              <div>
+                <strong>{directory.name}</strong>
+                <span>
+                  {directory.access === "read-write" ? "Read/write" : "Read only"}
+                </span>
+              </div>
+              <code>{directory.path}</code>
+            </div>
+          ))}
+        </div>
       </div>
     </section>
   );
@@ -201,9 +223,11 @@ export function App() {
   }, [selectedTarget, selectedWorkspace]);
 
   function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
+    if (workspace.id === selectedWorkspaceId) {
+      return;
+    }
     setSelectedWorkspaceId(workspace.id);
     setSelectedTargetId(workspace.targets[0]?.id ?? "");
-    setReadiness(null);
     setError(null);
   }
 
@@ -215,6 +239,19 @@ export function App() {
     );
     setSelectedWorkspaceId(workspaceId);
     setSelectedTargetId(workspace?.targets[0]?.id ?? "");
+    setEditor(null);
+    setError(null);
+  }
+
+  async function workspaceDeleted(workspaceId: string): Promise<void> {
+    const loadedCatalog = await window.opsCapsule.listWorkspaces();
+    const nextWorkspace = loadedCatalog.workspaces.find(
+      ({ id }) => id !== workspaceId,
+    );
+    setCatalog(loadedCatalog);
+    setSelectedWorkspaceId(nextWorkspace?.id ?? "");
+    setSelectedTargetId(nextWorkspace?.targets[0]?.id ?? "");
+    setReadiness(null);
     setEditor(null);
     setError(null);
   }
@@ -266,9 +303,12 @@ export function App() {
     <main
       className={`app-shell ${production && !editor ? "production-active" : ""}`}
     >
+      <div className="window-drag-region" aria-hidden="true" />
       <aside className="sidebar">
         <div className="brand">
-          <div className="brand-mark">OC</div>
+          <div className="brand-mark">
+            <img alt="" src="./opscapsule-mark.svg" />
+          </div>
           <div>
             <strong>OpsCapsule</strong>
             <span>Context, contained.</span>
@@ -319,6 +359,7 @@ export function App() {
           <WorkspaceEditor
             mode={editor.mode}
             onCancel={() => setEditor(null)}
+            onDeleted={workspaceDeleted}
             onSaved={workspaceSaved}
             workspaceId={editor.mode === "edit" ? editor.workspaceId : undefined}
           />
@@ -392,8 +433,10 @@ export function App() {
                     className={target.id === selectedTarget.id ? "selected" : ""}
                     key={target.id}
                     onClick={() => {
+                      if (target.id === selectedTarget.id) {
+                        return;
+                      }
                       setSelectedTargetId(target.id);
-                      setReadiness(null);
                       setError(null);
                     }}
                     type="button"
@@ -439,13 +482,36 @@ export function App() {
                       {readiness?.status ?? "checking"}
                     </span>
                   </header>
-                  {readiness?.checks.map((check) => (
-                    <div className="readiness-check" key={check.id}>
-                      <span className={`readiness-dot ${check.status}`} />
-                      <strong>{check.label}</strong>
-                      <small>{check.detail}</small>
-                    </div>
-                  ))}
+                  {readiness?.checks.map((check) => {
+                    const hasDetails = Boolean(check.details?.length);
+                    const detailsId = `readiness-${check.id}-details`;
+                    return (
+                      <div
+                        aria-describedby={hasDetails ? detailsId : undefined}
+                        className={`readiness-check ${hasDetails ? "has-details" : ""}`}
+                        key={check.id}
+                        tabIndex={hasDetails ? 0 : undefined}
+                      >
+                        <span className={`readiness-dot ${check.status}`} />
+                        <strong>{check.label}</strong>
+                        <small>{check.detail}</small>
+                        {hasDetails ? (
+                          <div
+                            className="readiness-details-tooltip"
+                            id={detailsId}
+                            role="tooltip"
+                          >
+                            <span>Review details</span>
+                            <ul>
+                              {check.details?.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                   {readinessError ? (
                     <div className="readiness-check">
                       <span className="readiness-dot fail" />
@@ -499,9 +565,11 @@ export function App() {
         ) : (
           <section className="empty-state">
             <h2>
-              {catalog && catalog.errors.length > 0
-                ? "No valid workspace manifests"
-                : "Loading workspaces…"}
+              {!catalog
+                ? "Loading workspaces…"
+                : catalog.errors.length > 0
+                  ? "No valid workspace manifests"
+                  : "No workspaces configured"}
             </h2>
             {catalog ? <code>{catalog.configDirectory}</code> : null}
           </section>

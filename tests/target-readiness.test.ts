@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -59,6 +59,50 @@ describe("target readiness", () => {
     expect(report.status).toBe("blocked");
     expect(report.checks).toContainEqual(
       expect.objectContaining({ id: "adapter", status: "fail" }),
+    );
+  });
+
+  it("includes individual managed configuration warnings", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opscapsule-readiness-"));
+    temporaryDirectories.push(root);
+    const sourceConfig = join(root, "agent-settings.json");
+    await writeFile(
+      sourceConfig,
+      JSON.stringify({ plugins: ["example-plugin"], hooks: { start: "echo" } }),
+    );
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = {
+      id: "managed-readiness",
+      name: "Managed readiness",
+    };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.targets[0]!.isolation.mode = "context-only";
+    manifest.agentProfiles[0]!.configuration.files = [
+      {
+        source: sourceConfig,
+        destination: ".config/agent/settings.json",
+      },
+    ];
+    await registry.create(manifest);
+
+    const report = await checkTargetReadiness(
+      await registry.resolveTarget("managed-readiness", "development"),
+    );
+    const configuration = report.checks.find(
+      ({ id }) => id === "configuration",
+    );
+
+    expect(configuration).toEqual(
+      expect.objectContaining({
+        status: "warning",
+        details: expect.arrayContaining([
+          ".config/agent/settings.json: Plugin or marketplace configuration is present.",
+          ".config/agent/settings.json: Executable hooks or commands may be declared.",
+        ]),
+      }),
     );
   });
 });
