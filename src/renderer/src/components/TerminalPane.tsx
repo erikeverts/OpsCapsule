@@ -28,7 +28,8 @@ export function TerminalPane({
       cursorStyle: "bar",
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: 13,
-      lineHeight: 1.25,
+      // Block-based TUI graphics rely on adjacent rows meeting cleanly.
+      lineHeight: 1,
       scrollback: 5_000,
       theme: {
         background: "#0a0f14",
