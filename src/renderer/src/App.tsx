@@ -482,13 +482,36 @@ export function App() {
                       {readiness?.status ?? "checking"}
                     </span>
                   </header>
-                  {readiness?.checks.map((check) => (
-                    <div className="readiness-check" key={check.id}>
-                      <span className={`readiness-dot ${check.status}`} />
-                      <strong>{check.label}</strong>
-                      <small>{check.detail}</small>
-                    </div>
-                  ))}
+                  {readiness?.checks.map((check) => {
+                    const hasDetails = Boolean(check.details?.length);
+                    const detailsId = `readiness-${check.id}-details`;
+                    return (
+                      <div
+                        aria-describedby={hasDetails ? detailsId : undefined}
+                        className={`readiness-check ${hasDetails ? "has-details" : ""}`}
+                        key={check.id}
+                        tabIndex={hasDetails ? 0 : undefined}
+                      >
+                        <span className={`readiness-dot ${check.status}`} />
+                        <strong>{check.label}</strong>
+                        <small>{check.detail}</small>
+                        {hasDetails ? (
+                          <div
+                            className="readiness-details-tooltip"
+                            id={detailsId}
+                            role="tooltip"
+                          >
+                            <span>Review details</span>
+                            <ul>
+                              {check.details?.map((item) => (
+                                <li key={item}>{item}</li>
+                              ))}
+                            </ul>
+                          </div>
+                        ) : null}
+                      </div>
+                    );
+                  })}
                   {readinessError ? (
                     <div className="readiness-check">
                       <span className="readiness-dot fail" />

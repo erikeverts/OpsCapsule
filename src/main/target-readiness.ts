@@ -77,6 +77,7 @@ async function configurationCheck(
 
   try {
     const warnings: AgentConfigurationWarning[] = [];
+    const warningDetails: string[] = [];
     for (const file of files) {
       const path = resolveConfiguredPath(
         file.source,
@@ -86,7 +87,13 @@ async function configurationCheck(
       if (!info.isFile() || info.isSymbolicLink()) {
         throw new Error(`${file.source} is not a regular managed file`);
       }
-      warnings.push(...(await inspectAgentConfigurationFile(path)).warnings);
+      const inspection = await inspectAgentConfigurationFile(path);
+      warnings.push(...inspection.warnings);
+      warningDetails.push(
+        ...inspection.warnings.map(
+          ({ message }) => `${file.destination}: ${message}`,
+        ),
+      );
     }
     const categories = [...new Set(warnings.map(({ category }) => category))];
     const identityOverride = categories.includes("identity");
@@ -104,6 +111,9 @@ async function configurationCheck(
           : warnings.length > 0
           ? `${files.length} file${files.length === 1 ? "" : "s"} available; review ${categories.join(", ")} warnings.`
           : `${files.length} managed file${files.length === 1 ? "" : "s"} available with no detected concerns.`,
+      ...(warningDetails.length > 0
+        ? { details: [...new Set(warningDetails)] }
+        : {}),
     };
   } catch (error) {
     return {

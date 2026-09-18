@@ -158,6 +158,7 @@ export interface TargetReadinessCheck {
   label: string;
   status: ReadinessCheckStatus;
   detail: string;
+  details?: string[];
 }
 
 export interface TargetReadinessReport {
