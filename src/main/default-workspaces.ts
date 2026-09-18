@@ -12,6 +12,17 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
       name: "Atlas Retail",
       description: "Example workspace with separate non-production and production targets.",
     },
+    agentProfiles: [
+      {
+        id: "default-agent",
+        name: "Default agent command",
+        adapter: "command",
+        runtime: { command: "$SHELL", args: [] },
+        configuration: { files: [] },
+        environment: {},
+      },
+    ],
+    defaultAgentProfile: "default-agent",
     cloudConnections: [
       {
         id: "aws-nonprod",
@@ -80,7 +91,6 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "development",
         directories: ["application", "documentation"],
         defaultDirectory: "application",
-        agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -95,7 +105,6 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "production",
         directories: ["application", "documentation"],
         defaultDirectory: "application",
-        agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -114,6 +123,17 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
       name: "Borealis Health",
       description: "Example staging workspace.",
     },
+    agentProfiles: [
+      {
+        id: "default-agent",
+        name: "Default agent command",
+        adapter: "command",
+        runtime: { command: "$SHELL", args: [] },
+        configuration: { files: [] },
+        environment: {},
+      },
+    ],
+    defaultAgentProfile: "default-agent",
     cloudConnections: [
       {
         id: "aws-staging",
@@ -156,7 +176,6 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "staging",
         directories: ["operations"],
         defaultDirectory: "operations",
-        agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },

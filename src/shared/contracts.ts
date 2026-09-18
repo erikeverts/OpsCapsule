@@ -12,6 +12,14 @@ export interface CommandRuntimeDefinition {
   args: string[];
 }
 
+export interface AgentProfileSummary {
+  id: string;
+  name: string;
+  adapter: string;
+  command: string;
+  legacy: boolean;
+}
+
 export interface DirectorySummary {
   id: string;
   name: string;
@@ -43,7 +51,7 @@ export interface WorkspaceTargetSummary {
   kubernetes?: KubernetesContextSummary;
   directories: DirectorySummary[];
   defaultDirectory: string;
-  agentRuntime: CommandRuntimeDefinition;
+  agent: AgentProfileSummary;
   isolationMode: IsolationMode;
   networkMode: NetworkMode;
 }
@@ -99,9 +107,17 @@ export interface KubernetesContextOption {
   current: boolean;
 }
 
+export interface AgentConfigurationFileOption {
+  adapter: "opencode";
+  name: string;
+  path: string;
+  destination: string;
+}
+
 export interface LocalResourceOptions {
   awsProfiles: AwsProfileOption[];
   kubernetesContexts: KubernetesContextOption[];
+  agentConfigurationFiles: AgentConfigurationFileOption[];
 }
 
 export interface RuntimePaths {
@@ -111,6 +127,7 @@ export interface RuntimePaths {
   kubeconfig: string;
   sandboxConfig: string;
   targetState: string;
+  agentState: string;
 }
 
 export interface EffectiveIsolation {

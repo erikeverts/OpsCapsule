@@ -21,6 +21,7 @@ import {
 } from "node:path";
 import { parse, stringify } from "yaml";
 import type {
+  AgentConfigurationFileOption,
   AwsProfileOption,
   DirectoryInspection,
   KubernetesContextOption,
@@ -219,6 +220,35 @@ export async function discoverKubernetesContexts(
   );
 }
 
+export async function discoverAgentConfigurationFiles(
+  homeDirectory = homedir(),
+): Promise<
+  AgentConfigurationFileOption[]
+> {
+  const candidates: AgentConfigurationFileOption[] = [
+    {
+      adapter: "opencode",
+      name: "OpenCode settings",
+      path: join(homeDirectory, ".config", "opencode", "opencode.json"),
+      destination: ".config/opencode/opencode.json",
+    },
+    {
+      adapter: "opencode",
+      name: "OpenCode terminal settings",
+      path: join(homeDirectory, ".config", "opencode", "tui.json"),
+      destination: ".config/opencode/tui.json",
+    },
+  ];
+  const discovered = await Promise.all(
+    candidates.map(async (candidate) =>
+      (await readable(candidate.path)) ? candidate : undefined,
+    ),
+  );
+  return discovered.filter(
+    (candidate): candidate is AgentConfigurationFileOption => Boolean(candidate),
+  );
+}
+
 async function stageReferencedFile(
   value: unknown,
   sourceDirectory: string,
@@ -357,9 +387,10 @@ export async function inspectDirectory(path: string): Promise<DirectoryInspectio
 }
 
 export async function discoverLocalResources(): Promise<LocalResourceOptions> {
-  const [awsProfiles, kubernetesContexts] = await Promise.all([
+  const [awsProfiles, kubernetesContexts, agentConfigurationFiles] = await Promise.all([
     discoverAwsProfiles(),
     discoverKubernetesContexts(),
+    discoverAgentConfigurationFiles(),
   ]);
-  return { awsProfiles, kubernetesContexts };
+  return { awsProfiles, kubernetesContexts, agentConfigurationFiles };
 }

@@ -147,6 +147,7 @@ describe.skipIf(!macOsSandboxAvailable)(
           kubeconfig: join(root, "kubeconfig.yaml"),
           sandboxConfig: join(root, "sandbox.json"),
           targetState: join(base, "target-state"),
+          agentState: join(base, "target-state", "agents", "example"),
         };
         const isolation = await new SandboxRuntimeIsolationBackend({
           applicationRoot: process.cwd(),
@@ -208,6 +209,7 @@ describe.skipIf(process.platform !== "darwin" || macOsSandboxAvailable)(
         kubeconfig: join(base, "kubeconfig.yaml"),
         sandboxConfig: join(base, "sandbox.json"),
         targetState: join(base, "target-state"),
+        agentState: join(base, "target-state", "agents", "example"),
       };
       await Promise.all([
         mkdir(runtime.home, { recursive: true }),

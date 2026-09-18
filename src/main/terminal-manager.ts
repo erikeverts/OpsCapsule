@@ -10,6 +10,8 @@ import type {
 } from "../shared/contracts.js";
 import type { PreparedIsolation } from "./isolation/types.js";
 import { CommandRuntimeAdapter } from "./runtime-adapters/command.js";
+import { prepareAgentLaunch } from "./runtime-adapters/readiness.js";
+import { RuntimeAdapterRegistry } from "./runtime-adapters/registry.js";
 import type { ProcessLaunchSpec } from "./runtime-adapters/types.js";
 import {
   buildWorkspaceEnvironment,
@@ -38,7 +40,10 @@ export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
 
-  constructor(private readonly events: TerminalEvents) {}
+  constructor(
+    private readonly events: TerminalEvents,
+    private readonly runtimeAdapters = new RuntimeAdapterRegistry(),
+  ) {}
 
   createSessionId(): string {
     return randomUUID();
@@ -58,7 +63,11 @@ export class TerminalManager {
       args: [] as string[],
     };
     const terminals: TerminalDescriptor[] = [
-      { id: randomUUID(), title: "Agent", kind: "agent" },
+      {
+        id: randomUUID(),
+        title: `Agent · ${resolvedTarget.agent.profile.name}`,
+        kind: "agent",
+      },
       { id: randomUUID(), title: "Shell A", kind: "shell" },
       { id: randomUUID(), title: "Shell B", kind: "shell" },
     ];
@@ -67,17 +76,18 @@ export class TerminalManager {
 
     try {
       for (const terminal of terminals) {
-        const definition =
-          terminal.kind === "agent"
-            ? resolvedTarget.target.agentRuntime
-            : shellDefinition;
-        const adapter = new CommandRuntimeAdapter(definition);
-        const launchSpec = adapter.buildLaunchSpec({
+        const adapter = terminal.kind === "agent"
+          ? this.runtimeAdapters.createAgent(resolvedTarget.agent)
+          : new CommandRuntimeAdapter(shellDefinition);
+        let launchSpec = adapter.buildLaunchSpec({
           runtime,
           environment,
           role: terminal.kind,
           cwd,
         });
+        if (terminal.kind === "agent") {
+          launchSpec = await prepareAgentLaunch(launchSpec, isolation);
+        }
         this.spawnTerminal(
           sessionId,
           terminal.id,

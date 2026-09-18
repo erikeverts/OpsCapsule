@@ -72,6 +72,12 @@ function ContextStrip({ target }: { target: WorkspaceTargetSummary }) {
         <strong>{target.kubernetes?.context ?? "Isolated empty config"}</strong>
       </div>
       <div>
+        <span>Agent</span>
+        <strong>
+          {target.agent.name} · {target.agent.adapter}
+        </strong>
+      </div>
+      <div>
         <span>Filesystem</span>
         <strong>
           {target.isolationMode === "enforced"

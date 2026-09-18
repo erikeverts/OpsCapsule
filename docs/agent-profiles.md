@@ -1,8 +1,8 @@
-# Agent profile manifest proposal
+# Agent profile manifests
 
-This document defines the proposed manifest contract for Iteration 4. It is a
-design artifact: the current application still uses `target.agentRuntime` until
-the schema, Workspace Studio, and runtime changes are implemented together.
+This document defines the agent profile manifest contract implemented in
+Iteration 4. Existing `target.agentRuntime` declarations remain readable as a
+compatibility path.
 
 The design keeps agents and model providers independent. An agent profile says
 how to prepare and launch an interactive agent CLI. A target still says which
@@ -104,7 +104,7 @@ The development target inherits `opencode-bedrock`; production overrides it with
 `custom-agent`. A target does not need an override when it uses the workspace
 default.
 
-## Proposed fields
+## Fields
 
 ### `agentProfiles`
 
@@ -133,7 +133,9 @@ is not a useful managed agent command.
 
 Environment variable names must match `[A-Za-z_][A-Za-z0-9_]*`. Values are always
 strings and are stored as plaintext. Secrets, shell substitutions, and references
-to inherited host variables are not supported by this field.
+to inherited host variables are not supported by this field. Variables controlling
+the synthetic home, temporary storage, agent state, Kubernetes context, AWS
+identity, and `OPSCAPSULE_*` context are reserved and cannot be overridden.
 
 ### `configuration.files`
 
@@ -207,7 +209,7 @@ state root. No mutable state path is configurable as an arbitrary host path.
 
 ## Deliberately deferred
 
-This proposal does not define:
+This iteration does not define:
 
 - secret values or a credential broker;
 - workspace metadata, reference documents, instructions, or curated memory;

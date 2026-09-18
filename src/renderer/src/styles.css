@@ -362,7 +362,7 @@ button {
 
 .context-strip {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   margin-bottom: 16px;
   overflow: hidden;
   border: 1px solid #25343d;
@@ -1046,6 +1046,40 @@ button {
   color: #5f7a82;
   font-family: "SFMono-Regular", Consolas, monospace;
   font-size: 8px;
+}
+
+.configuration-files {
+  display: grid;
+  gap: 8px;
+}
+
+.configuration-file {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  padding: 9px;
+  border: 1px solid #293b44;
+  border-radius: 7px;
+  background: #0d161c;
+}
+
+.configuration-file .path-input {
+  min-width: 0;
+}
+
+.configuration-file input,
+.configuration-file select {
+  width: 100%;
+  height: 34px;
+  min-width: 0;
+  padding: 0 9px;
+  border: 1px solid #30414a;
+  border-radius: 7px;
+  outline: none;
+  color: #c9d8dd;
+  background: #0b1318;
+  font: 10px "SFMono-Regular", Consolas, monospace;
 }
 
 .target-editor-card {

@@ -22,6 +22,72 @@ afterEach(async () => {
 });
 
 describe("workspace runtime isolation", () => {
+  it("imports managed agent configuration and keeps state target-specific", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-agent-"));
+    temporaryDirectories.push(baseDirectory);
+    const sourceConfig = join(baseDirectory, "opencode.json");
+    await writeFile(sourceConfig, '{"provider":"example"}\n');
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = { id: "managed-agent", name: "Managed Agent" };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.agentProfiles = [
+      {
+        id: "opencode",
+        name: "OpenCode",
+        adapter: "opencode",
+        runtime: { command: "opencode", args: [] },
+        configuration: {
+          files: [
+            {
+              source: sourceConfig,
+              destination: ".config/opencode/opencode.json",
+            },
+          ],
+        },
+        environment: {},
+      },
+    ];
+    manifest.defaultAgentProfile = "opencode";
+    delete manifest.targets[0]!.agentProfile;
+    delete manifest.targets[0]!.agentRuntime;
+
+    const created = await registry.create(manifest);
+    expect(
+      created.manifest.agentProfiles[0]?.configuration.files[0]?.source,
+    ).toBe("resources/agents/opencode/opencode.json");
+
+    const target = await registry.resolveTarget("managed-agent", "development");
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "agent-session",
+      target,
+    );
+    const stagedConfig = join(
+      runtime.home,
+      ".config",
+      "opencode",
+      "opencode.json",
+    );
+    expect(await readFile(stagedConfig, "utf8")).toContain(
+      '"provider":"example"',
+    );
+    expect(runtime.agentState).toBe(
+      join(
+        runtime.targetState,
+        "agents",
+        "opencode",
+      ),
+    );
+    const sessionMarker = join(runtime.agentState, "sessions", "marker");
+    await writeFile(sessionMarker, "persistent\n");
+
+    await cleanupWorkspaceRuntime(runtime);
+    expect(await readFile(sessionMarker, "utf8")).toBe("persistent\n");
+  });
+
   it("creates separate runtime homes, temp directories, and kubeconfigs", async () => {
     const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-runtime-"));
     temporaryDirectories.push(baseDirectory);
@@ -44,7 +110,11 @@ describe("workspace runtime isolation", () => {
       developmentRuntime,
       development,
       cloudAdapters,
-      { PATH: "/test/bin", AWS_ACCESS_KEY_ID: "must-not-leak" },
+      {
+        PATH: "/test/bin",
+        AWS_ACCESS_KEY_ID: "must-not-leak",
+        UNRELATED_API_TOKEN: "must-not-leak",
+      },
     );
     const productionEnvironment = buildWorkspaceEnvironment(
       productionRuntime,
@@ -58,6 +128,7 @@ describe("workspace runtime isolation", () => {
     expect(developmentEnvironment.HOME).toBe(developmentRuntime.home);
     expect(developmentEnvironment.TMPDIR).toBe(developmentRuntime.temp);
     expect(developmentEnvironment.AWS_ACCESS_KEY_ID).toBeUndefined();
+    expect(developmentEnvironment.UNRELATED_API_TOKEN).toBeUndefined();
     expect(developmentEnvironment.AWS_PROFILE).toBe("atlas-nonprod");
     expect(productionEnvironment.AWS_PROFILE).toBe("atlas-prod");
 
@@ -169,6 +240,7 @@ describe("workspace runtime isolation", () => {
     const registry = new WorkspaceRegistry(baseDirectory);
     await registry.initialize();
     const target = await registry.resolveTarget("custom", "production");
+    expect(target.summary.agent.legacy).toBe(true);
     const runtime = await createWorkspaceRuntime(
       baseDirectory,
       "custom-session",

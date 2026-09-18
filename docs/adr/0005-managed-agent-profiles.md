@@ -1,6 +1,6 @@
 # ADR 0005: Managed agent profiles
 
-- Status: Proposed
+- Status: Experimental
 - Date: 2026-09-18
 
 ## Context
@@ -25,7 +25,7 @@ provider.
 
 ## Decision
 
-The workspace manifest will define reusable, workspace-scoped `agentProfiles`.
+The workspace manifest defines reusable, workspace-scoped `agentProfiles`.
 A workspace can select a `defaultAgentProfile`, and a target can optionally select
 a different profile with `agentProfile`. Selection is resolved in this order:
 
@@ -43,13 +43,13 @@ An agent profile declares:
 - zero or more managed configuration files with workspace-relative sources and
   synthetic-home-relative destinations.
 
-The first adapter-specific integration will be `opencode`. The `command` adapter
+The first adapter-specific integration is `opencode`. The `command` adapter
 remains the generic fallback for any interactive CLI. Adapters translate the
 portable profile into process and filesystem preparation; they do not embed or
 call an agent SDK. Unknown adapter ids remain representable but make a target
 unavailable until an adapter is installed.
 
-The proposed manifest contract is specified in
+The manifest contract is specified in
 [`docs/agent-profiles.md`](../agent-profiles.md).
 
 ### Managed configuration
@@ -82,17 +82,19 @@ and an explicit save even when it appears not to contain credentials.
 
 OpsCapsule does not import credential stores, authentication files, history,
 session databases, caches, plugins, or arbitrary configuration directories. In
-particular, the first OpenCode slice will not copy `auth.json` or its data
+particular, the first OpenCode slice does not copy `auth.json` or its data
 directory. Static secrets do not belong in the manifest or managed configuration.
 A future credential broker can provide secret-backed integrations without making
 credentials portable workspace files.
 
 ### Environment and target identity
 
-Only environment entries declared by the profile and the context prepared by the
+Only a small process baseline such as `PATH`, locale, and terminal settings,
+environment entries declared by the profile, and the context prepared by the
 selected target are passed to the agent. OpsCapsule does not copy arbitrary
 variables from the host login shell. Literal profile environment values are stored
-as plaintext and are therefore for non-secret settings only.
+as plaintext and are therefore for non-secret settings only. Profile values cannot
+override OpsCapsule-managed identity, home, temporary, or state variables.
 
 This keeps agent and model-provider choices separate. For example, an OpenCode
 profile can contain non-secret Bedrock model settings while authentication comes
@@ -144,9 +146,10 @@ those selections into its native configuration format.
 
 Agent-native configuration imported in the first slice may already contain hooks
 or MCP declarations. It remains constrained by the process sandbox and network
-policy, and the import flow must surface those entries for review. The normalized
-workspace tool model is the future portable and policy-aware replacement; it is
-not part of the initial agent-profile schema.
+policy. The initial UI shows the exact imported files and a warning; structured
+inspection of individual hooks and MCP entries belongs with the future normalized
+workspace tool model. That model is the portable and policy-aware replacement and
+is not part of the initial agent-profile schema.
 
 ### Mutable agent state
 

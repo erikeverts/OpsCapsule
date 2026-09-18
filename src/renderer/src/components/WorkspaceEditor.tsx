@@ -17,6 +17,7 @@ import {
   type WorkspaceManifest,
 } from "../../../shared/workspace-schema";
 import {
+  renameAgentProfile as renameAgentProfileDraft,
   renameCloudConnection as renameCloudConnectionDraft,
   renameDirectory as renameDirectoryDraft,
   renameKubernetesContext as renameKubernetesContextDraft,
@@ -29,6 +30,7 @@ type EditorSection =
   | "directories"
   | "cloud"
   | "kubernetes"
+  | "agents"
   | "targets";
 
 interface WorkspaceEditorProps {
@@ -53,6 +55,7 @@ const editorSections: Array<{
   { id: "directories", label: "Directories", description: "Filesystem access" },
   { id: "cloud", label: "Cloud", description: "Accounts and identities" },
   { id: "kubernetes", label: "Kubernetes", description: "Cluster contexts" },
+  { id: "agents", label: "Agents", description: "Profiles and configuration" },
   { id: "targets", label: "Targets", description: "Operational environments" },
 ];
 
@@ -64,6 +67,17 @@ function blankWorkspace(): WorkspaceManifest {
       id: "new-workspace",
       name: "New workspace",
     },
+    agentProfiles: [
+      {
+        id: "agent",
+        name: "Agent",
+        adapter: "command",
+        runtime: { command: "$SHELL", args: [] },
+        configuration: { files: [] },
+        environment: {},
+      },
+    ],
+    defaultAgentProfile: "agent",
     cloudConnections: [],
     kubernetesContexts: [],
     directories: [
@@ -82,7 +96,6 @@ function blankWorkspace(): WorkspaceManifest {
         risk: "development",
         directories: ["workspace"],
         defaultDirectory: "workspace",
-        agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -127,6 +140,26 @@ function matchesKubernetesOption(
     source.type === "kubeconfig" &&
     option.path === source.path &&
     option.name === source.context
+  );
+}
+
+function environmentText(environment: Record<string, string>): string {
+  return Object.entries(environment)
+    .map(([name, value]) => `${name}=${value}`)
+    .join("\n");
+}
+
+function parseEnvironmentText(value: string): Record<string, string> {
+  return Object.fromEntries(
+    value
+      .split("\n")
+      .map((line) => {
+        const separator = line.indexOf("=");
+        return separator < 0
+          ? [line.trim(), ""]
+          : [line.slice(0, separator).trim(), line.slice(separator + 1)];
+      })
+      .filter(([name]) => Boolean(name)),
   );
 }
 
@@ -246,6 +279,7 @@ export function WorkspaceEditor({
   const [localResources, setLocalResources] = useState<LocalResourceOptions>({
     awsProfiles: [],
     kubernetesContexts: [],
+    agentConfigurationFiles: [],
   });
   const [resourceDiscoveryError, setResourceDiscoveryError] = useState<
     string | null
@@ -264,6 +298,9 @@ export function WorkspaceEditor({
   const [generatedTargetIds, setGeneratedTargetIds] = useState<Set<string>>(
     () => (mode === "create" ? new Set(["development"]) : new Set()),
   );
+  const [generatedAgentProfileIds, setGeneratedAgentProfileIds] = useState<
+    Set<string>
+  >(() => (mode === "create" ? new Set(["agent"]) : new Set()));
 
   useEffect(() => {
     if (mode !== "edit" || !workspaceId) {
@@ -443,6 +480,16 @@ export function WorkspaceEditor({
     );
   }
 
+  function renameAgentProfile(index: number, name: string): void {
+    renameTrackedResource(
+      draft?.agentProfiles[index]?.id,
+      generatedAgentProfileIds,
+      setGeneratedAgentProfileIds,
+      (manifest, regenerate) =>
+        renameAgentProfileDraft(manifest, index, name, regenerate),
+    );
+  }
+
   async function save(): Promise<void> {
     if (!draft || validationError || saving) {
       return;
@@ -465,6 +512,7 @@ export function WorkspaceEditor({
       setGeneratedCloudConnectionIds(new Set());
       setGeneratedKubernetesContextIds(new Set());
       setGeneratedTargetIds(new Set());
+      setGeneratedAgentProfileIds(new Set());
       await onSaved(saved.manifest.metadata.id);
     } catch (reason) {
       setError(describeValidationError(reason));
@@ -1234,6 +1282,391 @@ export function WorkspaceEditor({
             </>
           ) : null}
 
+          {section === "agents" ? (
+            <>
+              <EditorSectionHeader
+                title="Agent profiles"
+                description="Configure how the Agent pane starts without exposing your real home directory."
+                action={
+                  <button
+                    className="small-button"
+                    onClick={() => {
+                      const name = "Agent profile";
+                      const id = uniqueIdentifier(
+                        name,
+                        draft.agentProfiles.map((item) => item.id),
+                      );
+                      setGeneratedAgentProfileIds((current) =>
+                        new Set(current).add(id),
+                      );
+                      updateDraft((next) => {
+                        next.agentProfiles.push({
+                          id,
+                          name,
+                          adapter: "command",
+                          runtime: { command: "$SHELL", args: [] },
+                          configuration: { files: [] },
+                          environment: {},
+                        });
+                        if (
+                          !next.defaultAgentProfile &&
+                          next.targets.every((target) => !target.agentRuntime)
+                        ) {
+                          next.defaultAgentProfile = id;
+                        }
+                      });
+                    }}
+                    type="button"
+                  >
+                    + Add profile
+                  </button>
+                }
+              />
+              {resourceDiscoveryError ? (
+                <p className="resource-discovery-note">
+                  Local agent settings could not be read: {resourceDiscoveryError}
+                </p>
+              ) : null}
+              <div className="studio-stack">
+                <div className="studio-card studio-fields">
+                  <Field
+                    label="Workspace default"
+                    hint="Targets inherit this profile unless they select an override."
+                    wide
+                  >
+                    <select
+                      value={draft.defaultAgentProfile ?? ""}
+                      onChange={(event) =>
+                        updateDraft((next) => {
+                          const value = event.target.value;
+                          if (value) {
+                            next.defaultAgentProfile = value;
+                            for (const target of next.targets) {
+                              if (!target.agentProfile) {
+                                delete target.agentRuntime;
+                              }
+                            }
+                          } else {
+                            delete next.defaultAgentProfile;
+                          }
+                        })
+                      }
+                    >
+                      <option value="">No workspace default</option>
+                      {draft.agentProfiles.map((profile) => (
+                        <option key={profile.id} value={profile.id}>
+                          {profile.name}
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+
+                {draft.agentProfiles.map((profile, index) => {
+                  const discoveredFiles =
+                    localResources.agentConfigurationFiles.filter(
+                      ({ adapter }) => adapter === profile.adapter,
+                    );
+                  const openCodeDestinations = [
+                    ".config/opencode/opencode.json",
+                    ".config/opencode/tui.json",
+                  ];
+                  return (
+                    <article className="studio-card" key={index}>
+                      <div className="resource-card-header">
+                        <div>
+                          <strong>{profile.name || "Untitled profile"}</strong>
+                          <span className="vcs-badge">{profile.adapter}</span>
+                          {draft.defaultAgentProfile === profile.id ? (
+                            <span className="vcs-badge">default</span>
+                          ) : null}
+                        </div>
+                        <button
+                          className="text-button danger"
+                          onClick={() =>
+                            updateDraft((next) => {
+                              const removed = next.agentProfiles[index]?.id;
+                              next.agentProfiles.splice(index, 1);
+                              if (next.defaultAgentProfile === removed) {
+                                const replacement = next.agentProfiles[0]?.id;
+                                if (replacement) {
+                                  next.defaultAgentProfile = replacement;
+                                } else {
+                                  delete next.defaultAgentProfile;
+                                }
+                              }
+                              for (const target of next.targets) {
+                                if (target.agentProfile === removed) {
+                                  delete target.agentProfile;
+                                }
+                              }
+                            })
+                          }
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      <div className="studio-fields">
+                        <Field label="Name">
+                          <input
+                            value={profile.name}
+                            onChange={(event) =>
+                              renameAgentProfile(index, event.target.value)
+                            }
+                          />
+                        </Field>
+                        <Field
+                          label="Id"
+                          hint={
+                            generatedAgentProfileIds.has(profile.id)
+                              ? "Generated from the profile name."
+                              : "Stable after the workspace is saved."
+                          }
+                        >
+                          <input disabled value={profile.id} />
+                        </Field>
+                        <Field label="Adapter">
+                          <select
+                            value={profile.adapter}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                const item = next.agentProfiles[index]!;
+                                item.adapter = event.target.value;
+                                item.configuration.files = [];
+                                if (
+                                  item.adapter === "opencode" &&
+                                  item.runtime.command === "$SHELL"
+                                ) {
+                                  item.runtime.command = "opencode";
+                                }
+                              })
+                            }
+                          >
+                            <option value="command">Custom command</option>
+                            <option value="opencode">OpenCode</option>
+                            {!["command", "opencode"].includes(profile.adapter) ? (
+                              <option value={profile.adapter}>{profile.adapter}</option>
+                            ) : null}
+                          </select>
+                        </Field>
+                        <Field label="Command">
+                          <input
+                            value={profile.runtime.command}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.agentProfiles[index]!.runtime.command =
+                                  event.target.value;
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field label="Arguments" wide hint="One literal argument per line.">
+                          <textarea
+                            rows={3}
+                            value={profile.runtime.args.join("\n")}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.agentProfiles[index]!.runtime.args =
+                                  event.target.value
+                                    .split("\n")
+                                    .filter((value) => value.length > 0);
+                              })
+                            }
+                          />
+                        </Field>
+                        <Field
+                          label="Environment"
+                          wide
+                          hint="One NAME=value per line. Values are stored as plaintext; do not enter secrets."
+                        >
+                          <textarea
+                            rows={4}
+                            value={environmentText(profile.environment)}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.agentProfiles[index]!.environment =
+                                  parseEnvironmentText(event.target.value);
+                              })
+                            }
+                          />
+                        </Field>
+
+                        {discoveredFiles.length > 0 ? (
+                          <Field
+                            label="Discovered configuration"
+                            hint="Selected files are copied into this workspace when you save."
+                            wide
+                          >
+                            <div className="choice-grid">
+                              {discoveredFiles.map((option) => {
+                                const checked = profile.configuration.files.some(
+                                  ({ destination }) =>
+                                    destination === option.destination,
+                                );
+                                return (
+                                  <label key={option.destination}>
+                                    <input
+                                      checked={checked}
+                                      onChange={(event) =>
+                                        updateDraft((next) => {
+                                          const files =
+                                            next.agentProfiles[index]!.configuration.files;
+                                          const filtered = files.filter(
+                                            ({ destination }) =>
+                                              destination !== option.destination,
+                                          );
+                                          next.agentProfiles[index]!.configuration.files =
+                                            event.target.checked
+                                              ? [
+                                                  ...filtered,
+                                                  {
+                                                    source: option.path,
+                                                    destination: option.destination,
+                                                  },
+                                                ]
+                                              : filtered;
+                                        })
+                                      }
+                                      type="checkbox"
+                                    />
+                                    <span>{option.name}</span>
+                                    <small>managed</small>
+                                  </label>
+                                );
+                              })}
+                            </div>
+                          </Field>
+                        ) : null}
+
+                        <div className="studio-field studio-field-wide">
+                          <span>Managed configuration files</span>
+                          <div className="configuration-files">
+                            {profile.configuration.files.map((file, fileIndex) => (
+                              <div className="configuration-file" key={fileIndex}>
+                                <div className="path-input">
+                                  <input
+                                    aria-label="Configuration source"
+                                    value={file.source}
+                                    onChange={(event) =>
+                                      updateDraft((next) => {
+                                        next.agentProfiles[index]!.configuration.files[
+                                          fileIndex
+                                        ]!.source = event.target.value;
+                                      })
+                                    }
+                                  />
+                                  <button
+                                    className="small-button"
+                                    onClick={() =>
+                                      void browsePath("file", (path) =>
+                                        updateDraft((next) => {
+                                          next.agentProfiles[
+                                            index
+                                          ]!.configuration.files[fileIndex]!.source = path;
+                                        }),
+                                      )
+                                    }
+                                    type="button"
+                                  >
+                                    Browse…
+                                  </button>
+                                </div>
+                                {profile.adapter === "opencode" ? (
+                                  <select
+                                    aria-label="Configuration destination"
+                                    value={file.destination}
+                                    onChange={(event) =>
+                                      updateDraft((next) => {
+                                        next.agentProfiles[index]!.configuration.files[
+                                          fileIndex
+                                        ]!.destination = event.target.value;
+                                      })
+                                    }
+                                  >
+                                    {openCodeDestinations.map((destination) => (
+                                      <option key={destination} value={destination}>
+                                        {destination}
+                                      </option>
+                                    ))}
+                                  </select>
+                                ) : (
+                                  <input
+                                    aria-label="Configuration destination"
+                                    placeholder=".config/agent/config.json"
+                                    value={file.destination}
+                                    onChange={(event) =>
+                                      updateDraft((next) => {
+                                        next.agentProfiles[index]!.configuration.files[
+                                          fileIndex
+                                        ]!.destination = event.target.value;
+                                      })
+                                    }
+                                  />
+                                )}
+                                <button
+                                  className="text-button danger"
+                                  onClick={() =>
+                                    updateDraft((next) => {
+                                      next.agentProfiles[
+                                        index
+                                      ]!.configuration.files.splice(fileIndex, 1);
+                                    })
+                                  }
+                                  type="button"
+                                >
+                                  Remove file
+                                </button>
+                              </div>
+                            ))}
+                            <button
+                              className="small-button"
+                              disabled={
+                                profile.adapter === "opencode" &&
+                                openCodeDestinations.every((destination) =>
+                                  profile.configuration.files.some(
+                                    (file) => file.destination === destination,
+                                  ),
+                                )
+                              }
+                              onClick={() =>
+                                updateDraft((next) => {
+                                  const item = next.agentProfiles[index]!;
+                                  const destination =
+                                    item.adapter === "opencode"
+                                      ? openCodeDestinations.find(
+                                          (candidate) =>
+                                            !item.configuration.files.some(
+                                              (file) =>
+                                                file.destination === candidate,
+                                            ),
+                                        ) ?? openCodeDestinations[0]!
+                                      : ".config/agent/config.json";
+                                  item.configuration.files.push({
+                                    source: "",
+                                    destination,
+                                  });
+                                })
+                              }
+                              type="button"
+                            >
+                              + Add configuration file
+                            </button>
+                          </div>
+                          <small>
+                            Configuration can contain hooks or tool declarations.
+                            Review imported files; credentials and history are not
+                            imported automatically.
+                          </small>
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </>
+          ) : null}
+
           {section === "targets" ? (
             <>
               <EditorSectionHeader
@@ -1260,11 +1693,17 @@ export function WorkspaceEditor({
                           risk: "development",
                           directories: firstDirectory ? [firstDirectory] : [],
                           defaultDirectory: firstDirectory,
-                          agentRuntime: {
-                            adapter: "command",
-                            command: "$SHELL",
-                            args: [],
-                          },
+                          ...(draft.defaultAgentProfile
+                            ? {}
+                            : draft.agentProfiles[0]
+                              ? { agentProfile: draft.agentProfiles[0].id }
+                              : {
+                                  agentRuntime: {
+                                    adapter: "command" as const,
+                                    command: "$SHELL",
+                                    args: [],
+                                  },
+                                }),
                           isolation: {
                             mode: "enforced",
                             network: { mode: "public", allowedDomains: [] },
@@ -1440,29 +1879,79 @@ export function WorkspaceEditor({
                           ))}
                         </select>
                       </Field>
-                      <Field label="Agent command">
-                        <input
-                          value={target.agentRuntime.command}
+                      <Field
+                        label="Agent profile"
+                        hint="Leave inherited to use the workspace default."
+                      >
+                        <select
+                          value={target.agentProfile ?? ""}
                           onChange={(event) =>
                             updateDraft((next) => {
-                              next.targets[index]!.agentRuntime.command = event.target.value;
+                              const item = next.targets[index]!;
+                              const value = event.target.value;
+                              if (value) {
+                                item.agentProfile = value;
+                                delete item.agentRuntime;
+                              } else {
+                                delete item.agentProfile;
+                              }
                             })
                           }
-                        />
+                        >
+                          <option value="">
+                            {target.agentRuntime && !draft.defaultAgentProfile
+                              ? "Legacy target command"
+                              : draft.defaultAgentProfile
+                                ? `Inherit: ${
+                                    draft.agentProfiles.find(
+                                      ({ id }) =>
+                                        id === draft.defaultAgentProfile,
+                                    )?.name ?? draft.defaultAgentProfile
+                                  }`
+                                : "No workspace default"}
+                          </option>
+                          {draft.agentProfiles.map((profile) => (
+                            <option key={profile.id} value={profile.id}>
+                              {profile.name}
+                            </option>
+                          ))}
+                        </select>
                       </Field>
-                      <Field label="Agent arguments" wide hint="One argument per line.">
-                        <textarea
-                          rows={3}
-                          value={target.agentRuntime.args.join("\n")}
-                          onChange={(event) =>
-                            updateDraft((next) => {
-                              next.targets[index]!.agentRuntime.args = event.target.value
-                                .split("\n")
-                                .filter((value) => value.length > 0);
-                            })
-                          }
-                        />
-                      </Field>
+                      {target.agentRuntime &&
+                      !target.agentProfile &&
+                      !draft.defaultAgentProfile ? (
+                        <>
+                          <Field label="Legacy agent command">
+                            <input
+                              value={target.agentRuntime.command}
+                              onChange={(event) =>
+                                updateDraft((next) => {
+                                  next.targets[index]!.agentRuntime!.command =
+                                    event.target.value;
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Legacy agent arguments"
+                            wide
+                            hint="Create an agent profile to replace this compatibility runtime."
+                          >
+                            <textarea
+                              rows={3}
+                              value={target.agentRuntime.args.join("\n")}
+                              onChange={(event) =>
+                                updateDraft((next) => {
+                                  next.targets[index]!.agentRuntime!.args =
+                                    event.target.value
+                                      .split("\n")
+                                      .filter((value) => value.length > 0);
+                                })
+                              }
+                            />
+                          </Field>
+                        </>
+                      ) : null}
                       <Field label="Isolation">
                         <select
                           value={target.isolation.mode}

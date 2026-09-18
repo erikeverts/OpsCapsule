@@ -14,6 +14,145 @@ export const commandRuntimeSchema = z.object({
   args: z.array(z.string()).default([]),
 });
 
+const agentProcessSchema = z.object({
+  command: z.string().min(1),
+  args: z.array(z.string()).default([]),
+});
+
+const safeHomeRelativePath = z
+  .string()
+  .min(1)
+  .superRefine((value, context) => {
+    const normalized = value.replaceAll("\\", "/");
+    const segments = normalized.split("/");
+    if (
+      normalized.startsWith("/") ||
+      /^[A-Za-z]:\//.test(normalized) ||
+      segments.some((segment) => !segment || segment === "." || segment === "..")
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "Use a normalized relative path without empty, '.' or '..' segments",
+      });
+    }
+  });
+
+const reservedAgentDestinations = [
+  ".aws",
+  ".kube",
+  ".zshrc",
+  ".bashrc",
+  ".bash_profile",
+  ".profile",
+];
+
+const reservedAgentEnvironmentVariables = new Set([
+  "HOME",
+  "PATH",
+  "SHELL",
+  "TERM",
+  "COLORTERM",
+  "LANG",
+  "USER",
+  "LOGNAME",
+  "TZ",
+  "ZDOTDIR",
+  "XDG_CONFIG_HOME",
+  "XDG_DATA_HOME",
+  "XDG_CACHE_HOME",
+  "XDG_STATE_HOME",
+  "TMPDIR",
+  "TMP",
+  "TEMP",
+  "CLAUDE_CODE_TMPDIR",
+  "KUBECONFIG",
+  "AWS_PROFILE",
+  "AWS_DEFAULT_PROFILE",
+  "AWS_CONFIG_FILE",
+  "AWS_SHARED_CREDENTIALS_FILE",
+  "AWS_ACCESS_KEY_ID",
+  "AWS_SECRET_ACCESS_KEY",
+  "AWS_SESSION_TOKEN",
+  "AWS_REGION",
+  "AWS_DEFAULT_REGION",
+]);
+
+export const agentConfigurationFileSchema = z.object({
+  source: z.string().min(1),
+  destination: safeHomeRelativePath.superRefine((value, context) => {
+    const normalized = value.replaceAll("\\", "/");
+    if (
+      reservedAgentDestinations.some(
+        (reserved) => normalized === reserved || normalized.startsWith(`${reserved}/`),
+      )
+    ) {
+      context.addIssue({
+        code: "custom",
+        message: "This destination is reserved by OpsCapsule",
+      });
+    }
+  }),
+});
+
+export const agentProfileSchema = z
+  .object({
+    id: identifier,
+    name: z.string().min(1),
+    adapter: identifier,
+    runtime: agentProcessSchema,
+    configuration: z
+      .object({ files: z.array(agentConfigurationFileSchema).default([]) })
+      .default({ files: [] }),
+    environment: z
+      .record(
+        z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, {
+          message: "Use a valid environment variable name",
+        }),
+        z.string(),
+      )
+      .default({}),
+  })
+  .superRefine((profile, context) => {
+    for (const name of Object.keys(profile.environment)) {
+      if (
+        reservedAgentEnvironmentVariables.has(name) ||
+        name.startsWith("LC_") ||
+        name.startsWith("OPSCAPSULE_")
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["environment", name],
+          message: "This environment variable is managed by OpsCapsule",
+        });
+      }
+    }
+    const destinations = new Set<string>();
+    for (const [index, file] of profile.configuration.files.entries()) {
+      const destination = file.destination.replaceAll("\\", "/");
+      if (destinations.has(destination)) {
+        context.addIssue({
+          code: "custom",
+          path: ["configuration", "files", index, "destination"],
+          message: `Duplicate configuration destination '${destination}'`,
+        });
+      }
+      destinations.add(destination);
+      if (
+        profile.adapter === "opencode" &&
+        ![
+          ".config/opencode/opencode.json",
+          ".config/opencode/tui.json",
+        ].includes(destination)
+      ) {
+        context.addIssue({
+          code: "custom",
+          path: ["configuration", "files", index, "destination"],
+          message: "OpenCode profiles support only opencode.json and tui.json settings",
+        });
+      }
+    }
+  });
+
 export const cloudConnectionSchema = z.object({
   id: identifier,
   name: z.string().min(1),
@@ -74,7 +213,8 @@ export const targetSchema = z.object({
   kubernetesContext: identifier.optional(),
   directories: z.array(identifier).min(1),
   defaultDirectory: identifier,
-  agentRuntime: commandRuntimeSchema,
+  agentProfile: identifier.optional(),
+  agentRuntime: commandRuntimeSchema.optional(),
   isolation: z.object({
     mode: z.enum(["enforced", "context-only"]).default("enforced"),
     network: networkPolicySchema.default({
@@ -92,6 +232,8 @@ export const workspaceManifestSchema = z.object({
     name: z.string().min(1),
     description: z.string().min(1).optional(),
   }),
+  agentProfiles: z.array(agentProfileSchema).default([]),
+  defaultAgentProfile: identifier.optional(),
   cloudConnections: z.array(cloudConnectionSchema).default([]),
   kubernetesContexts: z.array(kubernetesContextSchema).default([]),
   directories: z.array(directorySchema).min(1),
@@ -99,6 +241,7 @@ export const workspaceManifestSchema = z.object({
 });
 
 export type WorkspaceManifest = z.infer<typeof workspaceManifestSchema>;
+export type AgentProfile = z.infer<typeof agentProfileSchema>;
 export type CloudConnection = z.infer<typeof cloudConnectionSchema>;
 export type KubernetesContext = z.infer<typeof kubernetesContextSchema>;
 export type WorkspaceDirectory = z.infer<typeof directorySchema>;
@@ -124,14 +267,39 @@ export function validateWorkspaceReferences(
   assertUniqueIds(manifest.kubernetesContexts, "Kubernetes context");
   assertUniqueIds(manifest.directories, "directory");
   assertUniqueIds(manifest.targets, "target");
+  assertUniqueIds(manifest.agentProfiles, "agent profile");
 
   const cloudIds = new Set(manifest.cloudConnections.map(({ id }) => id));
   const kubernetesIds = new Set(
     manifest.kubernetesContexts.map(({ id }) => id),
   );
   const directoryIds = new Set(manifest.directories.map(({ id }) => id));
+  const agentProfileIds = new Set(manifest.agentProfiles.map(({ id }) => id));
+
+  if (
+    manifest.defaultAgentProfile &&
+    !agentProfileIds.has(manifest.defaultAgentProfile)
+  ) {
+    throw new Error(
+      `Workspace references unknown default agent profile '${manifest.defaultAgentProfile}'`,
+    );
+  }
 
   for (const target of manifest.targets) {
+    if (target.agentProfile && !agentProfileIds.has(target.agentProfile)) {
+      throw new Error(
+        `Target '${target.id}' references unknown agent profile '${target.agentProfile}'`,
+      );
+    }
+    if (
+      !target.agentProfile &&
+      !manifest.defaultAgentProfile &&
+      !target.agentRuntime
+    ) {
+      throw new Error(
+        `Target '${target.id}' needs an agent profile, a workspace default, or a legacy agent runtime`,
+      );
+    }
     if (target.cloudConnection && !cloudIds.has(target.cloudConnection)) {
       throw new Error(
         `Target '${target.id}' references unknown cloud connection '${target.cloudConnection}'`,

@@ -6,6 +6,19 @@ metadata:
   name: Example workspace
   description: Example with separate non-production and production targets.
 
+agentProfiles:
+  - id: default-agent
+    name: Default agent command
+    adapter: command
+    runtime:
+      command: $SHELL
+      args: []
+    configuration:
+      files: []
+    environment: {}
+
+defaultAgentProfile: default-agent
+
 cloudConnections:
   - id: aws-nonprod
     name: AWS non-production
@@ -70,10 +83,6 @@ targets:
       - application
       - documentation
     defaultDirectory: application
-    agentRuntime:
-      adapter: command
-      command: $SHELL
-      args: []
     isolation:
       mode: enforced
       network:
@@ -90,10 +99,6 @@ targets:
       - application
       - documentation
     defaultDirectory: application
-    agentRuntime:
-      adapter: command
-      command: $SHELL
-      args: []
     isolation:
       mode: enforced
       network:
@@ -102,4 +107,3 @@ targets:
           - "*.amazonaws.com"
           - "api.github.com"
           - "github.com"
-

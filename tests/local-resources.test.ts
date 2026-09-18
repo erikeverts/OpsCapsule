@@ -12,6 +12,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { stringify } from "yaml";
 import {
   discoverAwsProfiles,
+  discoverAgentConfigurationFiles,
   discoverKubernetesContexts,
   extractAwsProfile,
   inspectDirectory,
@@ -49,6 +50,25 @@ describe("generated identifiers", () => {
 });
 
 describe("local resource discovery", () => {
+  it("discovers only supported OpenCode configuration files", async () => {
+    const root = await temporaryRoot();
+    const configDirectory = join(root, ".config", "opencode");
+    await mkdir(configDirectory, { recursive: true });
+    await Promise.all([
+      writeFile(join(configDirectory, "opencode.json"), "{}\n"),
+      writeFile(join(configDirectory, "tui.json"), "{}\n"),
+      writeFile(join(configDirectory, "auth.json"), '{"secret":"no"}\n'),
+    ]);
+
+    const files = await discoverAgentConfigurationFiles(root);
+
+    expect(files.map(({ path }) => path)).toEqual([
+      join(configDirectory, "opencode.json"),
+      join(configDirectory, "tui.json"),
+    ]);
+    expect(files.some(({ path }) => path.endsWith("auth.json"))).toBe(false);
+  });
+
   it("discovers AWS profiles and copies only the selected dependency chain", async () => {
     const root = await temporaryRoot();
     const configFile = join(root, "aws-config");

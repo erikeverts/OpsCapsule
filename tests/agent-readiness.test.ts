@@ -1,0 +1,45 @@
+import { describe, expect, it } from "vitest";
+import { ContextOnlyIsolation } from "../src/main/isolation/context-only.js";
+import {
+  prepareAgentLaunch,
+  resolveExecutable,
+} from "../src/main/runtime-adapters/readiness.js";
+
+describe("agent command readiness", () => {
+  it("resolves an executable without invoking a version command", async () => {
+    const command = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
+
+    await expect(
+      resolveExecutable(command, { PATH: process.env.PATH ?? "" }, process.cwd()),
+    ).resolves.toMatch(process.platform === "win32" ? /cmd\.exe$/i : /\/sh$/);
+  });
+
+  it("returns an absolute command after the isolation probe", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const isolation = new ContextOnlyIsolation([], [], "deny");
+
+    const launch = await prepareAgentLaunch(
+      {
+        command: "/bin/sh",
+        args: [],
+        cwd: process.cwd(),
+        env: { PATH: process.env.PATH ?? "" },
+      },
+      isolation,
+    );
+
+    expect(launch.command).toMatch(/\/sh$/);
+  });
+
+  it("reports a missing agent command clearly", async () => {
+    await expect(
+      resolveExecutable(
+        "opscapsule-command-that-does-not-exist",
+        { PATH: process.env.PATH ?? "" },
+        process.cwd(),
+      ),
+    ).rejects.toThrow("was not found or is not executable");
+  });
+});

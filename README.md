@@ -7,14 +7,20 @@ project contexts side by side without sharing mutable AWS or Kubernetes state. I
 is designed to be agent-agnostic and LLM-agnostic: an agent is a runtime launched
 inside a capsule, not a framework embedded into the application.
 
-## Iteration 3
+## Iteration 4
 
 The current iteration provides:
 
 - a Workspace Studio for creating and editing manifests without hand-writing
   YAML;
+- reusable workspace-level agent profiles with a workspace default and optional
+  target overrides;
+- managed OpenCode settings imports and a generic custom-command adapter;
+- persistent agent data, cache, and session state isolated by workspace, target,
+  and profile;
+- agent executable and sandbox-reachability checks before terminals start;
 - form-based management of directories, AWS connections, Kubernetes contexts,
-  targets, agent commands, and isolation policies;
+  agent profiles, targets, and isolation policies;
 - generated stable ids for workspaces and their resources, plus version-control
   indicators for configured directories;
 - discovery and workspace-scoped import of local AWS profiles and Kubernetes
@@ -36,8 +42,9 @@ The current iteration provides:
 - automated checks for workspace isolation and IPC input validation.
 
 The included examples contain no credentials and use `.invalid` endpoints.
-Provider and agent credential brokering, identity preflight, packaging, and a full
-security review are still required before production use.
+Provider and agent credential brokering, portable workspace context, identity
+preflight, packaging, and a full security review are still required before
+production use.
 
 ## Development
 
@@ -70,6 +77,6 @@ See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0002](docs/adr/0002-workspace-targets-and-isolation.md),
 [ADR 0003](docs/adr/0003-workspace-studio.md), and
 [ADR 0004](docs/adr/0004-managed-workspace-resources.md) for current
-configuration and decisions. The proposed Iteration 4 contract is described in
+configuration and decisions. The Iteration 4 agent-profile contract is described in
 [agent profiles](docs/agent-profiles.md) and
 [ADR 0005](docs/adr/0005-managed-agent-profiles.md).
