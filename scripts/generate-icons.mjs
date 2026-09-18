@@ -6,6 +6,7 @@ import sharp from "sharp";
 const repositoryRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const iconRoot = join(repositoryRoot, "assets", "icons");
 const sourcePath = join(iconRoot, "opscapsule.svg");
+const markSourcePath = join(iconRoot, "opscapsule-mark.svg");
 const pngRoot = join(iconRoot, "png");
 const macRoot = join(iconRoot, "macos");
 const iconsetPath = join(macRoot, "OpsCapsule.iconset");
@@ -16,6 +17,13 @@ const rendererIconPath = join(
   "renderer",
   "public",
   "opscapsule.svg",
+);
+const rendererMarkPath = join(
+  repositoryRoot,
+  "src",
+  "renderer",
+  "public",
+  "opscapsule-mark.svg",
 );
 
 const pngSizes = [16, 24, 32, 48, 64, 128, 256, 512, 1024];
@@ -89,6 +97,7 @@ async function renderPng(svg, size) {
 
 async function main() {
   const svg = await readFile(sourcePath);
+  const markSvg = await readFile(markSourcePath);
   await Promise.all([
     mkdir(pngRoot, { recursive: true }),
     mkdir(macRoot, { recursive: true }),
@@ -122,6 +131,7 @@ async function main() {
   );
   await writeFile(join(macRoot, "OpsCapsule.icns"), icns);
   await writeFile(rendererIconPath, svg);
+  await writeFile(rendererMarkPath, markSvg);
 
   console.log(`Generated icon assets from ${sourcePath}`);
 }

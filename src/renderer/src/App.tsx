@@ -282,7 +282,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="./opscapsule.svg" />
+            <img alt="" src="./opscapsule-mark.svg" />
           </div>
           <div>
             <strong>OpsCapsule</strong>

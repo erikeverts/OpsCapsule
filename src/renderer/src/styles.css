@@ -52,10 +52,10 @@ button {
 }
 
 .brand-mark {
-  width: 39px;
-  height: 39px;
+  width: 42px;
+  height: 42px;
   flex: 0 0 auto;
-  filter: drop-shadow(0 0 12px rgb(91 207 216 / 12%));
+  filter: drop-shadow(0 0 10px rgb(91 207 216 / 18%));
 }
 
 .brand-mark img {

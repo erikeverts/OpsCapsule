@@ -1,6 +1,8 @@
 # OpsCapsule icon assets
 
-`opscapsule.svg` is the canonical source for the application icon. Run:
+`opscapsule.svg` is the canonical source for the application icon.
+`opscapsule-mark.svg` is the transparent, small-size brand mark used inside the
+application UI. Run:
 
 ```sh
 npm run icons
@@ -15,6 +17,7 @@ to regenerate every derived asset.
 | Linux packaging and desktop entries | `png/512x512.png` (plus the other supplied sizes) |
 | Electron window and development dock icon | `png/256x256.png` |
 | Renderer/favicon | generated copy at `src/renderer/public/opscapsule.svg` |
+| In-app brand mark | generated copy at `src/renderer/public/opscapsule-mark.svg` |
 
 All PNG, ICO, and ICNS outputs are generated consistently on macOS, Linux, and
 Windows. The macOS `.iconset` directory is retained as an inspectable set of
