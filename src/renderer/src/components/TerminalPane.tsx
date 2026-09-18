@@ -1,4 +1,5 @@
 import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { useEffect, useRef } from "react";
 import type { TerminalDescriptor } from "../../../shared/contracts";
@@ -26,6 +27,7 @@ export function TerminalPane({
     const xterm = new Terminal({
       cursorBlink: true,
       cursorStyle: "bar",
+      customGlyphs: true,
       fontFamily: '"SFMono-Regular", Consolas, "Liberation Mono", monospace',
       fontSize: 13,
       // Block-based TUI graphics rely on adjacent rows meeting cleanly.
@@ -48,6 +50,19 @@ export function TerminalPane({
     const fitAddon = new FitAddon();
     xterm.loadAddon(fitAddon);
     xterm.open(container);
+
+    let webglAddon: WebglAddon | undefined;
+    try {
+      webglAddon = new WebglAddon();
+      webglAddon.onContextLoss(() => webglAddon?.dispose());
+      xterm.loadAddon(webglAddon);
+    } catch (error) {
+      webglAddon?.dispose();
+      console.warn(
+        "WebGL terminal rendering is unavailable; using the DOM renderer",
+        error,
+      );
+    }
     fitAddonRef.current = fitAddon;
 
     const fit = () => {
