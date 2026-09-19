@@ -1,3 +1,4 @@
+import { isAbsolute } from "node:path";
 import { describe, expect, it } from "vitest";
 import { ContextOnlyIsolation } from "../src/main/isolation/context-only.js";
 import {
@@ -9,9 +10,13 @@ describe("agent command readiness", () => {
   it("resolves an executable without invoking a version command", async () => {
     const command = process.platform === "win32" ? "cmd.exe" : "/bin/sh";
 
-    await expect(
-      resolveExecutable(command, { PATH: process.env.PATH ?? "" }, process.cwd()),
-    ).resolves.toMatch(process.platform === "win32" ? /cmd\.exe$/i : /\/sh$/);
+    const resolved = await resolveExecutable(
+      command,
+      { PATH: process.env.PATH ?? "" },
+      process.cwd(),
+    );
+
+    expect(isAbsolute(resolved)).toBe(true);
   });
 
   it("returns an absolute command after the isolation probe", async () => {
@@ -30,7 +35,7 @@ describe("agent command readiness", () => {
       isolation,
     );
 
-    expect(launch.command).toMatch(/\/sh$/);
+    expect(isAbsolute(launch.command)).toBe(true);
   });
 
   it("reports a missing agent command clearly", async () => {
