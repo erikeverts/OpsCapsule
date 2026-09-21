@@ -6,7 +6,6 @@ import { SandboxRuntimeIsolationBackend } from "./sandbox-runtime.js";
 import type { PreparedIsolation } from "./types.js";
 
 export async function prepareIsolation(
-  applicationRoot: string,
   runtime: RuntimePaths,
   resolvedTarget: ResolvedWorkspaceTarget,
 ): Promise<PreparedIsolation> {
@@ -37,7 +36,6 @@ export async function prepareIsolation(
   }
 
   return new SandboxRuntimeIsolationBackend({
-    applicationRoot,
     runtime,
     readOnlyPaths,
     readWritePaths: [...readWritePaths, runtime.targetState],

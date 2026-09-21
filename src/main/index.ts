@@ -1,5 +1,5 @@
 import { isAbsolute, join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, utilityProcess } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
@@ -37,8 +37,13 @@ let workspaceRegistry: WorkspaceRegistry;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
 const terminalManager = new TerminalManager({
-  data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
-  exit: (event) => mainWindow?.webContents.send(IPC.terminalExit, event),
+  events: {
+    data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
+    exit: (event) => mainWindow?.webContents.send(IPC.terminalExit, event),
+  },
+  forkWorker: (workerPath, options) =>
+    utilityProcess.fork(workerPath, [], options),
+  workerPath: join(__dirname, "terminal-worker.cjs"),
 });
 
 function registerIpcHandlers(): void {
@@ -122,7 +127,6 @@ function registerIpcHandlers(): void {
     );
     try {
       const isolation = await prepareIsolation(
-        app.getAppPath(),
         runtime,
         resolvedTarget,
       );

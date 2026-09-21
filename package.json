@@ -6,16 +6,20 @@
   "description": "An isolated workspace for operations tooling and agent runtimes.",
   "type": "module",
   "main": "dist/main.cjs",
+  "engines": {
+    "node": "24.x"
+  },
   "scripts": {
     "icons": "node scripts/generate-icons.mjs",
     "dev": "npm run build:main && concurrently -k -n renderer,electron -c cyan,magenta \"npm:dev:renderer\" \"npm:dev:electron\"",
     "dev:renderer": "vite --config vite.config.ts",
     "dev:electron": "wait-on tcp:5173 && cross-env OPSCAPSULE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "npm run typecheck && npm run build:main && npm run build:renderer",
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/main/isolation/sandbox-runner.ts --bundle --platform=node --format=esm --target=node22 --outfile=dist/sandbox-runner.mjs --external:@anthropic-ai/sandbox-runtime --external:@anthropic-ai/sandbox-runtime/* && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node22 --outfile=dist/preload.cjs --external:electron",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/main/terminal-worker.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/terminal-worker.cjs --external:node-pty --external:@anthropic-ai/sandbox-runtime --external:@anthropic-ai/sandbox-runtime/* && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/preload.cjs --external:electron",
     "build:renderer": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "verify:terminal-worker": "npm run build:main && electron scripts/verify-terminal-worker.cjs",
     "start": "npm run build && electron .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
@@ -32,7 +36,7 @@
   },
   "devDependencies": {
     "@electron/rebuild": "4.2.0",
-    "@types/node": "22.20.3",
+    "@types/node": "24.13.6",
     "@types/react": "19.3.0",
     "@types/react-dom": "19.3.0",
     "@vitejs/plugin-react": "6.1.1",

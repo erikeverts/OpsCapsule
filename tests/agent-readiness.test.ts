@@ -1,6 +1,5 @@
 import { isAbsolute } from "node:path";
 import { describe, expect, it } from "vitest";
-import { ContextOnlyIsolation } from "../src/main/isolation/context-only.js";
 import {
   prepareAgentLaunch,
   resolveExecutable,
@@ -23,8 +22,6 @@ describe("agent command readiness", () => {
     if (process.platform === "win32") {
       return;
     }
-    const isolation = new ContextOnlyIsolation([], [], "deny");
-
     const launch = await prepareAgentLaunch(
       {
         command: "/bin/sh",
@@ -32,7 +29,6 @@ describe("agent command readiness", () => {
         cwd: process.cwd(),
         env: { PATH: process.env.PATH ?? "" },
       },
-      isolation,
     );
 
     expect(isAbsolute(launch.command)).toBe(true);
