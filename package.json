@@ -20,6 +20,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify:terminal-worker": "npm run build:main && electron scripts/verify-terminal-worker.cjs",
+    "verify:wsl-host": "npm run build:main && esbuild scripts/verify-wsl-host.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/verify-wsl-host.cjs --external:electron --external:node-pty && node dist/verify-wsl-host.cjs",
     "start": "npm run build && electron .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },

@@ -79,7 +79,8 @@ Requirements inside the distribution:
 - for enforced isolation: `bwrap`, `socat`, and `rg`.
 
 The terminal worker described in ADR 0006 runs inside the distribution under that
-Node.js and talks to Electron over the `wsl.exe` pipe.
+Node.js and talks to Electron over the `wsl.exe` pipe. `npm run verify:wsl-host`
+exercises the whole path (helper, worker, enforced capsule) without Electron.
 
 The default distribution is used unless `OPSCAPSULE_WSL_DISTRO` names another.
 Workspace manifests stay in the Windows application-data directory, but the

@@ -87,7 +87,14 @@ unavailable. Native Windows execution of capsule processes is not offered.
   pipe, so nothing is subject to the Windows command-line length limit and no
   ConPTY sits between the renderer and the Linux pseudo-terminal.
 - Windows drives are visible at `/mnt/<drive>` inside WSL and are denied by the
-  enforced policy unless a configured directory re-allows a subtree.
+  enforced policy unless a configured directory re-allows a subtree. Sandbox
+  Runtime's own `apply-seccomp` helper is re-exposed read-only from the
+  application's `node_modules`, so a capsule sees only that skeleton path (for
+  example `/mnt/c/src/OpsCapsule/node_modules/...`) and nothing else on the
+  drive. The same applies to development checkouts under `/home` on Linux.
+- `npm run verify:wsl-host` (Windows, needs a WSL distribution prepared as
+  above) runs the production host, helper, worker, and an enforced capsule
+  without Electron and checks isolation from inside the capsule.
 - Studio discovery of `~/.aws` and `~/.kube` still reads the Windows-side home;
   importing them from the WSL home is planned as a follow-up.
 - Managed devices without virtualization cannot run OpsCapsule.
