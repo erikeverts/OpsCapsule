@@ -82,6 +82,7 @@ describe("sandbox policy", () => {
       deniedReadPaths: ["/Users", "/private/tmp"],
       readOnlyPaths: ["/workspace/docs"],
       readWritePaths: ["/workspace/app", "/private/tmp/capsule"],
+      backendReadPaths: ["/home/example/app/node_modules/srt/vendor/seccomp/x64"],
       network: { mode: "allowlist", allowedDomains: ["api.github.com"] },
       userHome: "/Users/example",
     });
@@ -91,6 +92,7 @@ describe("sandbox policy", () => {
       "/workspace/docs",
       "/workspace/app",
       "/private/tmp/capsule",
+      "/home/example/app/node_modules/srt/vendor/seccomp/x64",
     ]);
     expect(settings.filesystem.allowWrite).toEqual([
       "/workspace/app",
