@@ -10,6 +10,12 @@ import {
   buildSandboxRuntimeSettings,
   SandboxRuntimeIsolationBackend,
 } from "../src/main/isolation/sandbox-runtime.js";
+import {
+  cleanupSandboxCommand,
+  initializeSandboxRuntime,
+  resetSandboxRuntime,
+  wrapSandboxedLaunch,
+} from "../src/main/isolation/sandbox-command.js";
 import { allowsPublicDestination } from "../src/main/isolation/public-network.js";
 
 const executeFile = promisify(execFile);
@@ -150,7 +156,6 @@ describe.skipIf(!macOsSandboxAvailable)(
           agentState: join(base, "target-state", "agents", "example"),
         };
         const isolation = await new SandboxRuntimeIsolationBackend({
-          applicationRoot: process.cwd(),
           runtime,
           readOnlyPaths: [],
           readWritePaths: [allowed],
@@ -165,31 +170,44 @@ describe.skipIf(!macOsSandboxAvailable)(
           CLAUDE_CODE_TMPDIR: sessionTemp,
         } as Record<string, string>;
 
-        const allowedLaunch = isolation.wrap({
-          command: "/bin/cat",
-          args: [allowedFile],
-          cwd: allowed,
-          env: environment,
-        });
+        if (isolation.execution.backend !== "sandbox-runtime") {
+          throw new Error("Expected Sandbox Runtime execution");
+        }
+        await initializeSandboxRuntime(isolation.execution);
+        const allowedLaunch = await wrapSandboxedLaunch(
+          {
+            command: "/bin/cat",
+            args: [allowedFile],
+            cwd: allowed,
+            env: environment,
+          },
+          "allowed-read",
+        );
         const allowedResult = await executeFile(
           allowedLaunch.command,
           allowedLaunch.args,
           { cwd: allowedLaunch.cwd, env: allowedLaunch.env },
         );
+        cleanupSandboxCommand();
         expect(allowedResult.stdout).toBe("allowed\n");
 
-        const deniedLaunch = isolation.wrap({
-          command: "/bin/sh",
-          args: ["-c", 'cat "$1"', "child", deniedFile],
-          cwd: allowed,
-          env: environment,
-        });
+        const deniedLaunch = await wrapSandboxedLaunch(
+          {
+            command: "/bin/sh",
+            args: ["-c", 'cat "$1"', "child", deniedFile],
+            cwd: allowed,
+            env: environment,
+          },
+          "denied-read",
+        );
         await expect(
           executeFile(deniedLaunch.command, deniedLaunch.args, {
             cwd: deniedLaunch.cwd,
             env: deniedLaunch.env,
           }),
         ).rejects.toMatchObject({ code: 1 });
+        cleanupSandboxCommand();
+        await resetSandboxRuntime();
       },
       20_000,
     );
@@ -219,7 +237,6 @@ describe.skipIf(process.platform !== "darwin" || macOsSandboxAvailable)(
 
       await expect(
         new SandboxRuntimeIsolationBackend({
-          applicationRoot: process.cwd(),
           runtime,
           readOnlyPaths: [],
           readWritePaths: [base],

@@ -1,12 +1,7 @@
-import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, realpath } from "node:fs/promises";
 import { delimiter, isAbsolute, join, resolve } from "node:path";
-import { promisify } from "node:util";
-import type { PreparedIsolation } from "../isolation/types.js";
 import type { ProcessLaunchSpec } from "./types.js";
-
-const executeFile = promisify(execFile);
 
 function executableCandidates(command: string): string[] {
   if (process.platform !== "win32") {
@@ -64,31 +59,11 @@ export async function resolveExecutable(
 
 export async function prepareAgentLaunch(
   launchSpec: ProcessLaunchSpec,
-  isolation: PreparedIsolation,
 ): Promise<ProcessLaunchSpec> {
   const command = await resolveExecutable(
     launchSpec.command,
     launchSpec.env,
     launchSpec.cwd,
   );
-  if (process.platform !== "win32") {
-    const probe = isolation.wrap({
-      command: "/bin/test",
-      args: ["-x", command],
-      cwd: launchSpec.cwd,
-      env: launchSpec.env,
-    });
-    try {
-      await executeFile(probe.command, probe.args, {
-        cwd: probe.cwd,
-        env: probe.env,
-        timeout: 10_000,
-      });
-    } catch {
-      throw new Error(
-        `Agent command '${command}' exists but is not reachable inside this target's sandbox`,
-      );
-    }
-  }
   return { ...launchSpec, command };
 }

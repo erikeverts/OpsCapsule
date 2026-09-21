@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
-import * as pty from "node-pty";
+import type { UtilityProcess } from "electron";
 import type {
   RuntimePaths,
   TerminalDataEvent,
@@ -17,11 +17,47 @@ import {
   buildWorkspaceEnvironment,
   cleanupWorkspaceRuntime,
 } from "./runtime-directory.js";
+import {
+  isTerminalWorkerResponse,
+  type TerminalWorkerRequest,
+  type TerminalWorkerResponse,
+} from "./terminal-worker-protocol.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
+
+interface Deferred<T> {
+  promise: Promise<T>;
+  resolve: (value: T) => void;
+  reject: (reason: unknown) => void;
+}
+
+function deferred<T>(): Deferred<T> {
+  let resolve!: (value: T) => void;
+  let reject!: (reason: unknown) => void;
+  const promise = new Promise<T>((resolvePromise, rejectPromise) => {
+    resolve = resolvePromise;
+    reject = rejectPromise;
+  });
+  return { promise, resolve, reject };
+}
+
+function withTimeout<T>(
+  promise: Promise<T>,
+  milliseconds: number,
+  message: string,
+): Promise<T> {
+  let timer: NodeJS.Timeout | undefined;
+  const timeout = new Promise<T>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(message)), milliseconds);
+  });
+  return Promise.race([promise, timeout]).finally(() => {
+    if (timer) {
+      clearTimeout(timer);
+    }
+  });
+}
 
 interface TerminalRecord {
   sessionId: string;
-  process: pty.IPty;
   attached: boolean;
   pendingData: string;
 }
@@ -30,6 +66,12 @@ interface SessionRecord {
   workspaceId: string;
   terminalIds: Set<string>;
   runtime: RuntimePaths;
+  worker: UtilityProcess;
+  workerReady: Deferred<void>;
+  workerExit: Deferred<number>;
+  pendingStarts: Map<string, Deferred<void>>;
+  workerState: "starting" | "ready" | "stopping" | "exited";
+  diagnostics: string;
 }
 
 interface TerminalEvents {
@@ -37,14 +79,34 @@ interface TerminalEvents {
   exit: (event: TerminalExitEvent) => void;
 }
 
+interface WorkerOptions {
+  cwd: string;
+  env: Record<string, string>;
+  stdio: "pipe";
+  serviceName: string;
+}
+
+interface TerminalManagerOptions {
+  events: TerminalEvents;
+  workerPath: string;
+  forkWorker: (workerPath: string, options: WorkerOptions) => UtilityProcess;
+  runtimeAdapters?: RuntimeAdapterRegistry;
+}
+
 export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly events: TerminalEvents;
+  private readonly workerPath: string;
+  private readonly forkWorker: TerminalManagerOptions["forkWorker"];
+  private readonly runtimeAdapters: RuntimeAdapterRegistry;
 
-  constructor(
-    private readonly events: TerminalEvents,
-    private readonly runtimeAdapters = new RuntimeAdapterRegistry(),
-  ) {}
+  constructor(options: TerminalManagerOptions) {
+    this.events = options.events;
+    this.workerPath = options.workerPath;
+    this.forkWorker = options.forkWorker;
+    this.runtimeAdapters = options.runtimeAdapters ?? new RuntimeAdapterRegistry();
+  }
 
   createSessionId(): string {
     return randomUUID();
@@ -79,13 +141,32 @@ export class TerminalManager {
       { id: randomUUID(), title: "Shell B", kind: "shell" },
     ];
 
-    this.sessions.set(sessionId, {
+    const worker = this.forkWorker(this.workerPath, {
+      cwd,
+      env: environment,
+      stdio: "pipe",
+      serviceName: "OpsCapsule Terminal Worker",
+    });
+    const session: SessionRecord = {
       workspaceId: resolvedTarget.workspace.manifest.metadata.id,
       terminalIds: new Set(),
       runtime,
-    });
+      worker,
+      workerReady: deferred<void>(),
+      workerExit: deferred<number>(),
+      pendingStarts: new Map(),
+      workerState: "starting",
+      diagnostics: "",
+    };
+    this.sessions.set(sessionId, session);
+    this.bindWorker(sessionId, session, isolation);
 
     try {
+      await withTimeout(
+        session.workerReady.promise,
+        30_000,
+        "Timed out while initializing the terminal worker",
+      );
       for (const terminal of terminals) {
         const adapter = terminal.kind === "agent"
           ? this.runtimeAdapters.createAgent(resolvedTarget.agent)
@@ -97,12 +178,13 @@ export class TerminalManager {
           cwd,
         });
         if (terminal.kind === "agent") {
-          launchSpec = await prepareAgentLaunch(launchSpec, isolation);
+          launchSpec = await prepareAgentLaunch(launchSpec);
         }
-        this.spawnTerminal(
+        await this.spawnTerminal(
           sessionId,
           terminal.id,
-          isolation.wrap(launchSpec),
+          launchSpec,
+          terminal.kind === "agent",
         );
       }
     } catch (error) {
@@ -124,7 +206,8 @@ export class TerminalManager {
   }
 
   write(sessionId: string, terminalId: string, data: string): void {
-    this.getTerminal(sessionId, terminalId).process.write(data);
+    this.getTerminal(sessionId, terminalId);
+    this.postToWorker(sessionId, { type: "write", terminalId, data });
   }
 
   attach(sessionId: string, terminalId: string): void {
@@ -150,7 +233,8 @@ export class TerminalManager {
     cols: number,
     rows: number,
   ): void {
-    this.getTerminal(sessionId, terminalId).process.resize(cols, rows);
+    this.getTerminal(sessionId, terminalId);
+    this.postToWorker(sessionId, { type: "resize", terminalId, cols, rows });
   }
 
   async stopSession(sessionId: string): Promise<void> {
@@ -159,10 +243,25 @@ export class TerminalManager {
       return;
     }
 
+    session.workerState = "stopping";
+    try {
+      session.worker.postMessage(
+        { type: "shutdown" } satisfies TerminalWorkerRequest,
+      );
+      await withTimeout(
+        session.workerExit.promise,
+        3_000,
+        "Timed out while stopping the terminal worker",
+      );
+    } catch {
+      session.worker.kill();
+    }
     for (const terminalId of session.terminalIds) {
-      this.terminals.get(terminalId)?.process.kill();
       this.terminals.delete(terminalId);
     }
+    session.pendingStarts.forEach((pending) => {
+      pending.reject(new Error("Terminal worker stopped before launch completed"));
+    });
     this.sessions.delete(sessionId);
     await cleanupWorkspaceRuntime(session.runtime);
   }
@@ -173,40 +272,172 @@ export class TerminalManager {
     );
   }
 
-  private spawnTerminal(
+  private bindWorker(
+    sessionId: string,
+    session: SessionRecord,
+    isolation: PreparedIsolation,
+  ): void {
+    session.worker.stdout?.resume();
+    session.worker.stderr?.on("data", (chunk: Buffer | string) => {
+      session.diagnostics = `${session.diagnostics}${String(chunk)}`.slice(-8_192);
+    });
+    session.worker.on("spawn", () => {
+      session.worker.postMessage({
+        type: "initialize",
+        isolation: isolation.execution,
+      } satisfies TerminalWorkerRequest);
+    });
+    session.worker.on("message", (message: unknown) => {
+      if (isTerminalWorkerResponse(message)) {
+        this.handleWorkerMessage(sessionId, session, message);
+      }
+    });
+    session.worker.on("error", (_type, location, report) => {
+      this.failWorker(
+        sessionId,
+        session,
+        new Error(`Terminal worker failed at ${location}: ${report}`),
+      );
+    });
+    session.worker.on("exit", (exitCode) => {
+      const exitedBeforeReady = session.workerState === "starting";
+      if (exitedBeforeReady || exitCode !== 0 || session.terminalIds.size > 0) {
+        const diagnostics = session.diagnostics.trim();
+        this.failWorker(
+          sessionId,
+          session,
+          new Error(
+            `Terminal worker exited with code ${exitCode}${diagnostics ? `: ${diagnostics}` : ""}`,
+          ),
+        );
+      }
+      session.workerState = "exited";
+      session.workerExit.resolve(exitCode);
+    });
+  }
+
+  private handleWorkerMessage(
+    sessionId: string,
+    session: SessionRecord,
+    message: TerminalWorkerResponse,
+  ): void {
+    switch (message.type) {
+      case "ready":
+        session.workerState = "ready";
+        session.workerReady.resolve();
+        return;
+      case "terminal-started":
+        session.pendingStarts.get(message.terminalId)?.resolve();
+        session.pendingStarts.delete(message.terminalId);
+        return;
+      case "terminal-data": {
+        const terminal = this.terminals.get(message.terminalId);
+        if (!terminal || terminal.sessionId !== sessionId) {
+          return;
+        }
+        if (terminal.attached) {
+          this.events.data({
+            sessionId,
+            terminalId: message.terminalId,
+            data: message.data,
+          });
+        } else {
+          terminal.pendingData += message.data;
+        }
+        return;
+      }
+      case "terminal-exit":
+        this.finishTerminal(
+          sessionId,
+          session,
+          message.terminalId,
+          message.exitCode,
+        );
+        return;
+      case "terminal-error": {
+        const error = new Error(message.message);
+        session.pendingStarts.get(message.terminalId)?.reject(error);
+        session.pendingStarts.delete(message.terminalId);
+        this.finishTerminal(sessionId, session, message.terminalId, 1);
+        return;
+      }
+      case "fatal-error":
+        this.failWorker(sessionId, session, new Error(message.message));
+    }
+  }
+
+  private failWorker(
+    sessionId: string,
+    session: SessionRecord,
+    error: Error,
+  ): void {
+    if (session.workerState === "starting") {
+      session.workerReady.reject(error);
+    }
+    for (const [terminalId, pending] of session.pendingStarts) {
+      pending.reject(error);
+      this.finishTerminal(sessionId, session, terminalId, 1);
+    }
+    session.pendingStarts.clear();
+    for (const terminalId of [...session.terminalIds]) {
+      this.finishTerminal(sessionId, session, terminalId, 1);
+    }
+  }
+
+  private finishTerminal(
+    sessionId: string,
+    session: SessionRecord,
+    terminalId: string,
+    exitCode: number,
+  ): void {
+    if (!this.terminals.has(terminalId)) {
+      return;
+    }
+    this.events.exit({ sessionId, terminalId, exitCode });
+    this.terminals.delete(terminalId);
+    session.terminalIds.delete(terminalId);
+  }
+
+  private async spawnTerminal(
     sessionId: string,
     terminalId: string,
     launchSpec: ProcessLaunchSpec,
-  ): void {
-    const process = pty.spawn(launchSpec.command, launchSpec.args, {
-      name: "xterm-256color",
-      cols: 100,
-      rows: 28,
-      cwd: launchSpec.cwd,
-      env: launchSpec.env,
-    });
-
-    const terminalRecord: TerminalRecord = {
+    verifyExecutable: boolean,
+  ): Promise<void> {
+    const session = this.getSession(sessionId);
+    const pending = deferred<void>();
+    session.pendingStarts.set(terminalId, pending);
+    session.terminalIds.add(terminalId);
+    this.terminals.set(terminalId, {
       sessionId,
-      process,
       attached: false,
       pendingData: "",
-    };
-    this.terminals.set(terminalId, terminalRecord);
-    this.sessions.get(sessionId)?.terminalIds.add(terminalId);
+    });
+    session.worker.postMessage({
+      type: "start-terminal",
+      terminalId,
+      launchSpec,
+      verifyExecutable,
+      cols: 100,
+      rows: 28,
+    } satisfies TerminalWorkerRequest);
+    await withTimeout(
+      pending.promise,
+      15_000,
+      "Timed out while starting a terminal",
+    );
+  }
 
-    process.onData((data) => {
-      if (terminalRecord.attached) {
-        this.events.data({ sessionId, terminalId, data });
-      } else {
-        terminalRecord.pendingData += data;
-      }
-    });
-    process.onExit(({ exitCode }) => {
-      this.events.exit({ sessionId, terminalId, exitCode });
-      this.terminals.delete(terminalId);
-      this.sessions.get(sessionId)?.terminalIds.delete(terminalId);
-    });
+  private postToWorker(sessionId: string, message: TerminalWorkerRequest): void {
+    this.getSession(sessionId).worker.postMessage(message);
+  }
+
+  private getSession(sessionId: string): SessionRecord {
+    const session = this.sessions.get(sessionId);
+    if (!session) {
+      throw new Error("Workspace session is not active");
+    }
+    return session;
   }
 
   private getTerminal(sessionId: string, terminalId: string): TerminalRecord {

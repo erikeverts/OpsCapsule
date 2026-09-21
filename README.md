@@ -55,7 +55,7 @@ required before production use.
 
 ## Development
 
-Prerequisites are a recent Node.js release, npm, and the platform build tools
+Prerequisites are Node.js 24, npm, and the platform build tools
 needed by `node-pty`.
 
 Enforced isolation additionally requires:
@@ -82,6 +82,7 @@ Useful checks:
 npm test
 npm run typecheck
 npm run build
+npm run verify:terminal-worker
 ```
 
 See [workspace manifests](docs/workspace-manifests.md),
@@ -91,4 +92,6 @@ See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0004](docs/adr/0004-managed-workspace-resources.md) for current
 configuration and decisions. The Iteration 4 agent-profile contract is described in
 [agent profiles](docs/agent-profiles.md) and
-[ADR 0005](docs/adr/0005-managed-agent-profiles.md).
+[ADR 0005](docs/adr/0005-managed-agent-profiles.md). The application-owned
+terminal runtime and `RunAsNode` decision are documented in
+[ADR 0006](docs/adr/0006-terminal-utility-process.md).

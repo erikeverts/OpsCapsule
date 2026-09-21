@@ -1,9 +1,14 @@
 import type { EffectiveIsolation, RuntimePaths } from "../../shared/contracts.js";
-import type { ProcessLaunchSpec } from "../runtime-adapters/types.js";
 
 export interface PreparedIsolation {
   readonly effective: EffectiveIsolation;
-  wrap(launchSpec: ProcessLaunchSpec): ProcessLaunchSpec;
+  readonly execution:
+    | { backend: "none" }
+    | {
+        backend: "sandbox-runtime";
+        settingsPath: string;
+        networkMode: EffectiveIsolation["networkMode"];
+      };
 }
 
 export interface IsolationBackend {
@@ -12,7 +17,6 @@ export interface IsolationBackend {
 }
 
 export interface IsolationPreparationContext {
-  applicationRoot: string;
   runtime: RuntimePaths;
   readOnlyPaths: string[];
   readWritePaths: string[];

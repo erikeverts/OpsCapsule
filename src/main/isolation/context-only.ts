@@ -1,9 +1,9 @@
 import type { EffectiveIsolation } from "../../shared/contracts.js";
-import type { ProcessLaunchSpec } from "../runtime-adapters/types.js";
 import type { PreparedIsolation } from "./types.js";
 
 export class ContextOnlyIsolation implements PreparedIsolation {
   readonly effective: EffectiveIsolation;
+  readonly execution = { backend: "none" } as const;
 
   constructor(
     readOnlyPaths: string[],
@@ -18,9 +18,4 @@ export class ContextOnlyIsolation implements PreparedIsolation {
       networkMode,
     };
   }
-
-  wrap(launchSpec: ProcessLaunchSpec): ProcessLaunchSpec {
-    return launchSpec;
-  }
 }
-
