@@ -18,6 +18,13 @@ updates:
       semver-major-days: 14
       semver-minor-days: 7
       semver-patch-days: 5
+    ignore:
+      # Electron owns the runtime Node version. Move @types/node to a new
+      # major only when Electron moves to that Node major as part of a
+      # deliberate runtime upgrade; keep receiving minor and patch updates.
+      - dependency-name: "@types/node"
+        update-types:
+          - "version-update:semver-major"
     groups:
       dev-dependencies:
         dependency-type: development
