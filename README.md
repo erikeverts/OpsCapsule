@@ -63,8 +63,30 @@ Enforced isolation additionally requires:
 - macOS: `rg` (ripgrep); or
 - Linux: `bwrap`, `socat`, and `rg`.
 
-Windows can parse the same manifests but currently requires explicit
-`context-only` mode while its isolation backend is evaluated.
+### Windows
+
+On Windows the Electron application runs natively while every capsule process
+runs inside a WSL 2 distribution. Runtime files (synthetic homes, kubeconfigs,
+sandbox policies) live in the distribution under `~/.local/state/opscapsule`,
+and enforced isolation uses the Linux Bubblewrap backend inside WSL.
+
+Requirements inside the distribution:
+
+- Node.js on the login-shell `PATH` (for example `apt install nodejs`, or a
+  version manager configured in `~/.profile`, `~/.zprofile`, or `~/.bashrc`);
+- a Linux build of `node-pty` in the checkout (`npm rebuild node-pty` from
+  inside the distribution; needs `make`, `g++`, and `python3`);
+- for enforced isolation: `bwrap`, `socat`, and `rg`.
+
+The terminal worker described in ADR 0006 runs inside the distribution under that
+Node.js and talks to Electron over the `wsl.exe` pipe. `npm run verify:wsl-host`
+exercises the whole path (helper, worker, enforced capsule) without Electron.
+
+The default distribution is used unless `OPSCAPSULE_WSL_DISTRO` names another.
+Workspace manifests stay in the Windows application-data directory, but the
+paths inside them are Linux paths as seen from the distribution (for example
+`~/projects/app` or `/mnt/c/Users/Ada/projects/app`). See
+[ADR 0007](docs/adr/0007-windows-wsl-execution-host.md) for details and limits.
 
 ```sh
 npm install
@@ -94,4 +116,5 @@ configuration and decisions. The Iteration 4 agent-profile contract is described
 [agent profiles](docs/agent-profiles.md) and
 [ADR 0005](docs/adr/0005-managed-agent-profiles.md). The application-owned
 terminal runtime and `RunAsNode` decision are documented in
-[ADR 0006](docs/adr/0006-terminal-utility-process.md).
+[ADR 0006](docs/adr/0006-terminal-utility-process.md), and the Windows/WSL
+execution host in [ADR 0007](docs/adr/0007-windows-wsl-execution-host.md).

@@ -15,38 +15,23 @@ import {
   workspaceDocumentInput,
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
-import { prepareIsolation } from "./isolation/prepare.js";
-import {
-  cleanupStaleWorkspaceRuntimes,
-  cleanupWorkspaceRuntime,
-  createWorkspaceRuntime,
-} from "./runtime-directory.js";
+import { createExecutionHost } from "./hosts/index.js";
+import type { ExecutionHost } from "./hosts/types.js";
 import { TerminalManager } from "./terminal-manager.js";
-import { checkTargetReadiness } from "./target-readiness.js";
 import { WorkspaceRegistry } from "./workspace-registry.js";
 import {
   discoverLocalResources,
   inspectAgentConfigurationFile,
-  inspectDirectory,
 } from "./local-resources.js";
 
 app.setName("OpsCapsule");
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
+let terminalManager: TerminalManager | null = null;
 const hasSingleInstanceLock = app.requestSingleInstanceLock();
 
-const terminalManager = new TerminalManager({
-  events: {
-    data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
-    exit: (event) => mainWindow?.webContents.send(IPC.terminalExit, event),
-  },
-  forkWorker: (workerPath, options) =>
-    utilityProcess.fork(workerPath, [], options),
-  workerPath: join(__dirname, "terminal-worker.cjs"),
-});
-
-function registerIpcHandlers(): void {
+function registerIpcHandlers(host: ExecutionHost, terminals: TerminalManager): void {
   ipcMain.handle(IPC.listWorkspaces, () => workspaceRegistry.catalog());
 
   ipcMain.handle(IPC.getWorkspace, (_event, input: unknown) => {
@@ -66,7 +51,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.deleteWorkspace, async (_event, input: unknown) => {
     const { workspaceId, revision } = deleteWorkspaceInput.parse(input);
-    if (terminalManager.hasActiveWorkspace(workspaceId)) {
+    if (terminals.hasActiveWorkspace(workspaceId)) {
       throw new Error("Stop every capsule in this workspace before deleting it");
     }
     await workspaceRegistry.deleteWorkspace(workspaceId, revision);
@@ -81,12 +66,17 @@ function registerIpcHandlers(): void {
     const result = mainWindow
       ? await dialog.showOpenDialog(mainWindow, options)
       : await dialog.showOpenDialog(options);
-    return result.canceled ? null : (result.filePaths[0] ?? null);
+    const selected = result.canceled ? null : (result.filePaths[0] ?? null);
+    // Directories are used by capsule processes on the execution host; files
+    // (kubeconfig, AWS config) are read by this process when saving.
+    return selected && kind === "directory"
+      ? host.translateHostPath(selected)
+      : selected;
   });
 
   ipcMain.handle(IPC.inspectDirectory, (_event, input: unknown) => {
     const { path } = inspectDirectoryInput.parse(input);
-    return inspectDirectory(path);
+    return host.inspectDirectory(path);
   });
 
   ipcMain.handle(IPC.inspectAgentConfiguration, async (_event, input: unknown) => {
@@ -108,7 +98,7 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.checkTargetReadiness, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);
-    return checkTargetReadiness(
+    return host.checkTargetReadiness(
       await workspaceRegistry.resolveTarget(workspaceId, targetId),
     );
   });
@@ -119,47 +109,43 @@ function registerIpcHandlers(): void {
       workspaceId,
       targetId,
     );
-    const sessionId = terminalManager.createSessionId();
-    const runtime = await createWorkspaceRuntime(
-      app.getPath("userData"),
-      sessionId,
-      resolvedTarget,
-    );
+    const sessionId = terminals.createSessionId();
+    const capsule = await host.createRuntime(sessionId, resolvedTarget);
     try {
-      const isolation = await prepareIsolation(
-        runtime,
+      const isolation = await host.prepareIsolation(
+        capsule.runtime,
         resolvedTarget,
       );
-      return await terminalManager.startWorkspace(
+      return await terminals.startWorkspace(
         sessionId,
         resolvedTarget,
-        runtime,
+        capsule,
         isolation,
       );
     } catch (error) {
-      await cleanupWorkspaceRuntime(runtime);
+      await host.cleanupRuntime(capsule.runtime);
       throw error;
     }
   });
 
   ipcMain.handle(IPC.terminalWrite, (_event, input: unknown) => {
     const { sessionId, terminalId, data } = terminalWriteInput.parse(input);
-    terminalManager.write(sessionId, terminalId, data);
+    terminals.write(sessionId, terminalId, data);
   });
 
   ipcMain.handle(IPC.terminalAttach, (_event, input: unknown) => {
     const { sessionId, terminalId } = terminalAttachmentInput.parse(input);
-    terminalManager.attach(sessionId, terminalId);
+    terminals.attach(sessionId, terminalId);
   });
 
   ipcMain.handle(IPC.terminalResize, (_event, input: unknown) => {
     const { sessionId, terminalId, cols, rows } = terminalResizeInput.parse(input);
-    terminalManager.resize(sessionId, terminalId, cols, rows);
+    terminals.resize(sessionId, terminalId, cols, rows);
   });
 
   ipcMain.handle(IPC.stopWorkspace, async (_event, input: unknown) => {
     const { sessionId } = stopWorkspaceInput.parse(input);
-    await terminalManager.stopSession(sessionId);
+    await terminals.stopSession(sessionId);
   });
 }
 
@@ -190,7 +176,7 @@ async function createWindow(): Promise<void> {
   mainWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   mainWindow.webContents.on("will-navigate", (event) => event.preventDefault());
   mainWindow.on("closed", () => {
-    void terminalManager.stopAll();
+    void terminalManager?.stopAll();
     mainWindow = null;
   });
 
@@ -202,6 +188,24 @@ async function createWindow(): Promise<void> {
   }
 }
 
+async function initializeExecutionHost(): Promise<ExecutionHost> {
+  try {
+    return await createExecutionHost({
+      userDataDirectory: app.getPath("userData"),
+      applicationRoot: app.getAppPath(),
+      forkUtilityProcess: (modulePath, args, options) =>
+        utilityProcess.fork(modulePath, args, options),
+    });
+  } catch (error) {
+    dialog.showErrorBox(
+      "OpsCapsule cannot start",
+      error instanceof Error ? error.message : String(error),
+    );
+    app.exit(1);
+    throw error;
+  }
+}
+
 if (!hasSingleInstanceLock) {
   app.quit();
 }
@@ -210,15 +214,29 @@ app.whenReady().then(async () => {
   if (!hasSingleInstanceLock) {
     return;
   }
-  await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
+  const host = await initializeExecutionHost();
+  await host.cleanupStaleRuntimes();
   if (process.platform === "darwin") {
     app.dock?.setIcon(
       join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
     );
   }
-  workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
+  workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"), {
+    paths: host.paths,
+    demoRoot: host.path.join(host.stateDirectory, "demo-workspaces"),
+    createDemoDirectories: (directories) =>
+      host.createDemoDirectories(directories),
+    deleteWorkspaceState: (workspaceId) => host.deleteWorkspaceState(workspaceId),
+  });
   await workspaceRegistry.initialize();
-  registerIpcHandlers();
+  terminalManager = new TerminalManager({
+    host,
+    events: {
+      data: (event) => mainWindow?.webContents.send(IPC.terminalData, event),
+      exit: (event) => mainWindow?.webContents.send(IPC.terminalExit, event),
+    },
+  });
+  registerIpcHandlers(host, terminalManager);
   await createWindow();
 
   app.on("activate", async () => {
@@ -237,7 +255,7 @@ app.whenReady().then(async () => {
   });
 });
 
-app.on("before-quit", () => void terminalManager.stopAll());
+app.on("before-quit", () => void terminalManager?.stopAll());
 app.on("window-all-closed", () => {
   if (process.platform !== "darwin") {
     app.quit();

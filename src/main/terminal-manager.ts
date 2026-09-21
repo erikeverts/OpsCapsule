@@ -1,6 +1,4 @@
 import { randomUUID } from "node:crypto";
-import { realpath } from "node:fs/promises";
-import type { UtilityProcess } from "electron";
 import type {
   RuntimePaths,
   TerminalDataEvent,
@@ -8,15 +6,12 @@ import type {
   TerminalExitEvent,
   WorkspaceSession,
 } from "../shared/contracts.js";
+import type { ExecutionHost, TerminalWorkerProcess } from "./hosts/types.js";
 import type { PreparedIsolation } from "./isolation/types.js";
 import { CommandRuntimeAdapter } from "./runtime-adapters/command.js";
-import { prepareAgentLaunch } from "./runtime-adapters/readiness.js";
 import { RuntimeAdapterRegistry } from "./runtime-adapters/registry.js";
 import type { ProcessLaunchSpec } from "./runtime-adapters/types.js";
-import {
-  buildWorkspaceEnvironment,
-  cleanupWorkspaceRuntime,
-} from "./runtime-directory.js";
+import type { CapsuleRuntime } from "./runtime-directory.js";
 import {
   isTerminalWorkerResponse,
   type TerminalWorkerRequest,
@@ -66,7 +61,7 @@ interface SessionRecord {
   workspaceId: string;
   terminalIds: Set<string>;
   runtime: RuntimePaths;
-  worker: UtilityProcess;
+  worker: TerminalWorkerProcess;
   workerReady: Deferred<void>;
   workerExit: Deferred<number>;
   pendingStarts: Map<string, Deferred<void>>;
@@ -79,32 +74,22 @@ interface TerminalEvents {
   exit: (event: TerminalExitEvent) => void;
 }
 
-interface WorkerOptions {
-  cwd: string;
-  env: Record<string, string>;
-  stdio: "pipe";
-  serviceName: string;
-}
-
 interface TerminalManagerOptions {
+  host: ExecutionHost;
   events: TerminalEvents;
-  workerPath: string;
-  forkWorker: (workerPath: string, options: WorkerOptions) => UtilityProcess;
   runtimeAdapters?: RuntimeAdapterRegistry;
 }
 
 export class TerminalManager {
   private readonly terminals = new Map<string, TerminalRecord>();
   private readonly sessions = new Map<string, SessionRecord>();
+  private readonly host: ExecutionHost;
   private readonly events: TerminalEvents;
-  private readonly workerPath: string;
-  private readonly forkWorker: TerminalManagerOptions["forkWorker"];
   private readonly runtimeAdapters: RuntimeAdapterRegistry;
 
   constructor(options: TerminalManagerOptions) {
+    this.host = options.host;
     this.events = options.events;
-    this.workerPath = options.workerPath;
-    this.forkWorker = options.forkWorker;
     this.runtimeAdapters = options.runtimeAdapters ?? new RuntimeAdapterRegistry();
   }
 
@@ -121,11 +106,10 @@ export class TerminalManager {
   async startWorkspace(
     sessionId: string,
     resolvedTarget: ResolvedWorkspaceTarget,
-    runtime: RuntimePaths,
+    capsule: CapsuleRuntime,
     isolation: PreparedIsolation,
   ): Promise<WorkspaceSession> {
-    const environment = buildWorkspaceEnvironment(runtime, resolvedTarget);
-    const cwd = await realpath(resolvedTarget.defaultDirectory.path);
+    const { runtime, environment, workingDirectory: cwd } = capsule;
     const shellDefinition = {
       adapter: "command" as const,
       command: "$SHELL",
@@ -141,12 +125,7 @@ export class TerminalManager {
       { id: randomUUID(), title: "Shell B", kind: "shell" },
     ];
 
-    const worker = this.forkWorker(this.workerPath, {
-      cwd,
-      env: environment,
-      stdio: "pipe",
-      serviceName: "OpsCapsule Terminal Worker",
-    });
+    const worker = this.host.forkTerminalWorker({ cwd, env: environment });
     const session: SessionRecord = {
       workspaceId: resolvedTarget.workspace.manifest.metadata.id,
       terminalIds: new Set(),
@@ -171,19 +150,17 @@ export class TerminalManager {
         const adapter = terminal.kind === "agent"
           ? this.runtimeAdapters.createAgent(resolvedTarget.agent)
           : new CommandRuntimeAdapter(shellDefinition);
-        let launchSpec = adapter.buildLaunchSpec({
-          runtime,
-          environment,
-          role: terminal.kind,
-          cwd,
-        });
-        if (terminal.kind === "agent") {
-          launchSpec = await prepareAgentLaunch(launchSpec);
-        }
+        // The worker resolves and probes the agent executable itself: it
+        // runs on the execution host, which owns the capsule filesystem.
         await this.spawnTerminal(
           sessionId,
           terminal.id,
-          launchSpec,
+          adapter.buildLaunchSpec({
+            runtime,
+            environment,
+            role: terminal.kind,
+            cwd,
+          }),
           terminal.kind === "agent",
         );
       }
@@ -201,6 +178,7 @@ export class TerminalManager {
       target: resolvedTarget.summary,
       runtime,
       isolation: isolation.effective,
+      host: { id: this.host.id, label: this.host.label },
       terminals,
     };
   }
@@ -263,7 +241,7 @@ export class TerminalManager {
       pending.reject(new Error("Terminal worker stopped before launch completed"));
     });
     this.sessions.delete(sessionId);
-    await cleanupWorkspaceRuntime(session.runtime);
+    await this.host.cleanupRuntime(session.runtime);
   }
 
   async stopAll(): Promise<void> {

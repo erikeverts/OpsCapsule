@@ -27,6 +27,12 @@ export type TerminalWorkerResponse =
   | { type: "terminal-error"; terminalId: string; message: string }
   | { type: "fatal-error"; message: string };
 
+// When the worker runs outside Electron (inside WSL under Node.js), messages
+// travel as JSON lines over stdio. Responses carry this prefix so login-shell
+// noise on stdout is never mistaken for protocol traffic.
+export const stdioMessageMarker = "OPSCAPSULE_MESSAGE ";
+export const stdioTransportFlag = "--stdio";
+
 export function isTerminalWorkerResponse(
   value: unknown,
 ): value is TerminalWorkerResponse {
@@ -41,4 +47,25 @@ export function isTerminalWorkerResponse(
     "terminal-error",
     "fatal-error",
   ].includes(value.type);
+}
+
+export function encodeStdioMessage(message: TerminalWorkerResponse): string {
+  return `${stdioMessageMarker}${JSON.stringify(message)}\n`;
+}
+
+// Returns the response embedded in a stdout line, or undefined for a line
+// that does not carry one.
+export function decodeStdioMessage(line: string): TerminalWorkerResponse | undefined {
+  const start = line.lastIndexOf(stdioMessageMarker);
+  if (start < 0) {
+    return undefined;
+  }
+  try {
+    const parsed: unknown = JSON.parse(
+      line.slice(start + stdioMessageMarker.length).trim(),
+    );
+    return isTerminalWorkerResponse(parsed) ? parsed : undefined;
+  } catch {
+    return undefined;
+  }
 }

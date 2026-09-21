@@ -2,10 +2,10 @@ import { EventEmitter } from "node:events";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { UtilityProcess } from "electron";
 import { afterEach, describe, expect, it } from "vitest";
+import { LocalExecutionHost } from "../src/main/hosts/local.js";
+import type { TerminalWorkerProcess } from "../src/main/hosts/types.js";
 import { ContextOnlyIsolation } from "../src/main/isolation/context-only.js";
-import { createWorkspaceRuntime } from "../src/main/runtime-directory.js";
 import { TerminalManager } from "../src/main/terminal-manager.js";
 import type {
   TerminalWorkerRequest,
@@ -76,29 +76,45 @@ describe("terminal utility-process orchestration", () => {
     const registry = new WorkspaceRegistry(base);
     await registry.initialize();
     const target = await registry.resolveTarget("atlas", "development");
-    const runtime = await createWorkspaceRuntime(base, "worker-session", target);
     const workers: FakeUtilityProcess[] = [];
-    const dataEvents: Array<{ terminalId: string; data: string }> = [];
-    const manager = new TerminalManager({
-      events: {
-        data: ({ terminalId, data }) => dataEvents.push({ terminalId, data }),
-        exit: () => undefined,
-      },
-      workerPath: "/fixed/application/terminal-worker.cjs",
-      forkWorker: () => {
+    const forks: Array<{ modulePath: string; cwd: string; home: string | undefined }> = [];
+    const host = new LocalExecutionHost({
+      userDataDirectory: base,
+      applicationRoot: "/fixed/application",
+      forkUtilityProcess: (modulePath, _args, options) => {
+        forks.push({ modulePath, cwd: options.cwd, home: options.env.HOME });
         const worker = new FakeUtilityProcess();
         workers.push(worker);
         queueMicrotask(() => worker.emit("spawn"));
-        return worker as unknown as UtilityProcess;
+        return worker as unknown as TerminalWorkerProcess;
+      },
+    });
+    const capsule = await host.createRuntime("worker-session", target);
+    temporaryDirectories.push(capsule.runtime.temp);
+    const dataEvents: Array<{ terminalId: string; data: string }> = [];
+    const manager = new TerminalManager({
+      host,
+      events: {
+        data: ({ terminalId, data }) => dataEvents.push({ terminalId, data }),
+        exit: () => undefined,
       },
     });
 
     const session = await manager.startWorkspace(
       "worker-session",
       target,
-      runtime,
-      new ContextOnlyIsolation([], [runtime.root], "deny"),
+      capsule,
+      new ContextOnlyIsolation([], [capsule.runtime.root], "deny"),
     );
+
+    expect(forks).toEqual([
+      {
+        modulePath: "/fixed/application/dist/terminal-worker.cjs",
+        cwd: capsule.workingDirectory,
+        home: capsule.runtime.home,
+      },
+    ]);
+    expect(session.host).toEqual({ id: "local", label: host.label });
 
     expect(workers).toHaveLength(1);
     expect(

@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs";
 import { access, realpath, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { homedir, tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { promisify } from "node:util";
@@ -38,6 +39,8 @@ export function buildSandboxRuntimeSettings(options: {
   deniedReadPaths: string[];
   readOnlyPaths: string[];
   readWritePaths: string[];
+  // Application-owned files the sandbox backend itself needs to read.
+  backendReadPaths?: string[];
   network: IsolationPreparationContext["network"];
   userHome: string;
 }): SandboxRuntimeSettings {
@@ -60,7 +63,11 @@ export function buildSandboxRuntimeSettings(options: {
     },
     filesystem: {
       denyRead: options.deniedReadPaths,
-      allowRead: [...options.readOnlyPaths, ...options.readWritePaths],
+      allowRead: [
+        ...options.readOnlyPaths,
+        ...options.readWritePaths,
+        ...(options.backendReadPaths ?? []),
+      ],
       allowWrite: options.readWritePaths,
       denyWrite: [
         "/tmp/claude",
@@ -133,6 +140,30 @@ async function deniedUserDataRoots(): Promise<string[]> {
     ]);
   }
   return [];
+}
+
+// On Linux, Sandbox Runtime prefixes every workload with its bundled
+// apply-seccomp helper. The helper lives inside the application's
+// node_modules, which sits under a denied user-data root when the
+// application runs from a home directory or from /mnt inside WSL, so the
+// sandbox must re-expose that one directory read-only.
+async function sandboxBackendReadPaths(): Promise<string[]> {
+  if (process.platform !== "linux") {
+    return [];
+  }
+  let packageManifest: string;
+  try {
+    packageManifest = createRequire(__filename).resolve(
+      "@anthropic-ai/sandbox-runtime/package.json",
+    );
+  } catch {
+    throw new Error(
+      "Sandbox Runtime is not installed next to the application bundle; enforced isolation is unavailable",
+    );
+  }
+  return existingCanonicalPaths([
+    join(dirname(packageManifest), "vendor", "seccomp", process.arch),
+  ]);
 }
 
 export async function checkSandboxRuntimeAvailability(): Promise<void> {
@@ -219,6 +250,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
       deniedReadPaths: await deniedUserDataRoots(),
       readOnlyPaths,
       readWritePaths,
+      backendReadPaths: await sandboxBackendReadPaths(),
       network: this.context.network,
       userHome: homedir(),
     });

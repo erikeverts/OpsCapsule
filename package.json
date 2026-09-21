@@ -15,11 +15,12 @@
     "dev:renderer": "vite --config vite.config.ts",
     "dev:electron": "wait-on tcp:5173 && cross-env OPSCAPSULE_DEV_SERVER_URL=http://127.0.0.1:5173 electron .",
     "build": "npm run typecheck && npm run build:main && npm run build:renderer",
-    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/main/terminal-worker.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/terminal-worker.cjs --external:node-pty --external:@anthropic-ai/sandbox-runtime --external:@anthropic-ai/sandbox-runtime/* && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/preload.cjs --external:electron",
+    "build:main": "esbuild src/main/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/main.cjs --external:electron --external:node-pty && esbuild src/main/terminal-worker.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/terminal-worker.cjs --external:node-pty --external:@anthropic-ai/sandbox-runtime --external:@anthropic-ai/sandbox-runtime/* && esbuild src/main/hosts/wsl-helper.ts --bundle --platform=node --format=cjs --target=node20 --outfile=dist/wsl-helper.cjs && esbuild src/preload/index.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/preload.cjs --external:electron",
     "build:renderer": "vite build --config vite.config.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "verify:terminal-worker": "npm run build:main && electron scripts/verify-terminal-worker.cjs",
+    "verify:wsl-host": "npm run build:main && esbuild scripts/verify-wsl-host.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/verify-wsl-host.cjs --external:electron --external:node-pty && node dist/verify-wsl-host.cjs",
     "start": "npm run build && electron .",
     "postinstall": "electron-rebuild -f -w node-pty"
   },
