@@ -35,8 +35,13 @@ jobs:
           node-version: "22"
           cache: npm
 
+      # Lifecycle scripts are the primary execution vector in npm
+      # supply-chain compromises, so they are disabled in CI. Nothing in the
+      # build or test path needs them: node-pty is marked external by esbuild
+      # and is never imported by the test suite, and Electron itself is not
+      # launched here.
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --ignore-scripts
 
       - name: Build and type-check
         run: npm run build
