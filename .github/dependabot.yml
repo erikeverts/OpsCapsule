@@ -43,8 +43,8 @@ updates:
       prefix-development: "deps-dev"
       include: scope
 
-  # GitHub Actions used by CI. Pin-by-SHA is still recommended; Dependabot
-  # keeps the SHAs current.
+  # GitHub Actions used by CI and release workflows. Pin-by-SHA is still
+  # recommended; Dependabot keeps the SHAs current.
   - package-ecosystem: github-actions
     directory: /
     schedule:

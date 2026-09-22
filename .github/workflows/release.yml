@@ -1,0 +1,118 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  id-token: write
+  attestations: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  macos-arm64:
+    name: macOS arm64 prerelease
+    runs-on: macos-15
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Set up Node.js 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Verify release host
+        shell: bash
+        run: |
+          if [[ "$(uname -m)" != "arm64" || "$(node -p process.arch)" != "arm64" ]]; then
+            echo "The macOS release job must run natively on arm64." >&2
+            exit 1
+          fi
+          node --version
+
+      - name: Validate release tag
+        if: startsWith(github.ref, 'refs/tags/')
+        shell: bash
+        run: |
+          npm run verify:release-tag -- "${GITHUB_REF_NAME}"
+          release_commit="$(git rev-list -n 1 "${GITHUB_REF_NAME}")"
+          if ! git merge-base --is-ancestor "${release_commit}" origin/main; then
+            echo "Release tags must point to a commit contained in main." >&2
+            exit 1
+          fi
+
+      # The release job only runs for repository tags or an explicit manual
+      # dispatch on an ephemeral runner. Native dependencies require their
+      # locked install scripts in order to build for Electron's ABI.
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Build distributables
+        run: npm run make
+
+      - name: Verify packaged application
+        run: npm run verify:package
+
+      - name: Prepare release artifacts
+        id: artifacts
+        shell: bash
+        run: |
+          npm run prepare:release
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Verify distributable containers
+        shell: bash
+        run: |
+          (cd release && shasum -a 256 -c SHA256SUMS.txt)
+          hdiutil verify release/*.dmg
+          unzip -tqq release/*.zip
+
+      - name: Attest release provenance
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: actions/attest-build-provenance@c074443f1aee8d4aeeae555aebba3282517141b2 # v4.2.2
+        with:
+          subject-checksums: release/SHA256SUMS.txt
+
+      - name: Retain workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opscapsule-${{ steps.artifacts.outputs.version }}-macos-arm64-ad-hoc
+          path: release/
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      - name: Publish GitHub prerelease
+        if: startsWith(github.ref, 'refs/tags/')
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh release create "${GITHUB_REF_NAME}" \
+            release/* \
+            --verify-tag \
+            --prerelease \
+            --latest=false \
+            --generate-notes \
+            --title "OpsCapsule ${GITHUB_REF_NAME} (ad-hoc-signed macOS preview)" \
+            --notes "$(cat .github/release-notes/unsigned-macos.md)"
