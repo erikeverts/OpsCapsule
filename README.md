@@ -50,8 +50,8 @@ The current iteration provides:
 
 The included examples contain no credentials and use `.invalid` endpoints.
 Provider and agent credential brokering, workspace metadata and reference
-documents, identity preflight, packaging, and a full security review are still
-required before production use.
+documents, identity preflight, release signing/notarization, and a full security
+review are still required before production use.
 
 ## Development
 
@@ -84,6 +84,21 @@ npm run typecheck
 npm run build
 npm run verify:terminal-worker
 ```
+
+The macOS packaging foundation builds an ad-hoc-signed application bundle and
+ZIP/DMG artifacts. OpsCapsule's own terminal worker uses Electron's embedded
+Node.js; configured third-party agent commands remain external dependencies.
+
+```sh
+# Build and verify the application bundle.
+npm run package && npm run verify:package
+
+# Or build the ZIP/DMG distributables, then verify their application bundle.
+npm run make && npm run verify:package
+```
+
+See [packaging](docs/packaging.md) for artifact layout, hardening decisions,
+verification, and the remaining public-release work.
 
 See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0001](docs/adr/0001-electron-typescript-spike.md),

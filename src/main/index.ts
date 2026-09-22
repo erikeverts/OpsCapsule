@@ -1,5 +1,14 @@
 import { isAbsolute, join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, utilityProcess } from "electron";
+import { pathToFileURL } from "node:url";
+import {
+  app,
+  BrowserWindow,
+  dialog,
+  ipcMain,
+  net,
+  protocol,
+  utilityProcess,
+} from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
@@ -29,12 +38,36 @@ import {
   inspectAgentConfigurationFile,
   inspectDirectory,
 } from "./local-resources.js";
+import { verifyPackagedTerminalWorker } from "./packaged-smoke.js";
+import {
+  RENDERER_SCHEME,
+  RENDERER_URL,
+  resolveRendererAssetPath,
+} from "./renderer-protocol.js";
 
 app.setName("OpsCapsule");
+protocol.registerSchemesAsPrivileged([
+  {
+    scheme: RENDERER_SCHEME,
+    privileges: {
+      standard: true,
+      secure: true,
+      supportFetchAPI: true,
+      codeCache: true,
+    },
+  },
+]);
+
+const isPackagedSmokeTest = process.env.OPSCAPSULE_PACKAGED_SMOKE_TEST === "1";
+const smokeUserData = process.env.OPSCAPSULE_SMOKE_USER_DATA;
+if (isPackagedSmokeTest && smokeUserData) {
+  app.setPath("userData", smokeUserData);
+}
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
-const hasSingleInstanceLock = app.requestSingleInstanceLock();
+const hasSingleInstanceLock =
+  isPackagedSmokeTest || app.requestSingleInstanceLock();
 
 const terminalManager = new TerminalManager({
   events: {
@@ -45,6 +78,17 @@ const terminalManager = new TerminalManager({
     utilityProcess.fork(workerPath, [], options),
   workerPath: join(__dirname, "terminal-worker.cjs"),
 });
+
+function registerRendererProtocol(): void {
+  const rendererRoot = join(__dirname, "renderer");
+  protocol.handle(RENDERER_SCHEME, (request) => {
+    const assetPath = resolveRendererAssetPath(request.url, rendererRoot);
+    if (!assetPath) {
+      return new Response(null, { status: 404 });
+    }
+    return net.fetch(pathToFileURL(assetPath).toString());
+  });
+}
 
 function registerIpcHandlers(): void {
   ipcMain.handle(IPC.listWorkspaces, () => workspaceRegistry.catalog());
@@ -67,7 +111,9 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.deleteWorkspace, async (_event, input: unknown) => {
     const { workspaceId, revision } = deleteWorkspaceInput.parse(input);
     if (terminalManager.hasActiveWorkspace(workspaceId)) {
-      throw new Error("Stop every capsule in this workspace before deleting it");
+      throw new Error(
+        "Stop every capsule in this workspace before deleting it",
+      );
     }
     await workspaceRegistry.deleteWorkspace(workspaceId, revision);
   });
@@ -89,20 +135,25 @@ function registerIpcHandlers(): void {
     return inspectDirectory(path);
   });
 
-  ipcMain.handle(IPC.inspectAgentConfiguration, async (_event, input: unknown) => {
-    const { path, workspaceId } = inspectAgentConfigurationInput.parse(input);
-    let resolvedPath = path;
-    if (!isAbsolute(path)) {
-      if (!workspaceId) {
-        throw new Error("A workspace id is required for a managed relative path");
+  ipcMain.handle(
+    IPC.inspectAgentConfiguration,
+    async (_event, input: unknown) => {
+      const { path, workspaceId } = inspectAgentConfigurationInput.parse(input);
+      let resolvedPath = path;
+      if (!isAbsolute(path)) {
+        if (!workspaceId) {
+          throw new Error(
+            "A workspace id is required for a managed relative path",
+          );
+        }
+        resolvedPath = await workspaceRegistry.resolveAgentConfigurationPath(
+          workspaceId,
+          path,
+        );
       }
-      resolvedPath = await workspaceRegistry.resolveAgentConfigurationPath(
-        workspaceId,
-        path,
-      );
-    }
-    return inspectAgentConfigurationFile(resolvedPath);
-  });
+      return inspectAgentConfigurationFile(resolvedPath);
+    },
+  );
 
   ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
 
@@ -126,10 +177,7 @@ function registerIpcHandlers(): void {
       resolvedTarget,
     );
     try {
-      const isolation = await prepareIsolation(
-        runtime,
-        resolvedTarget,
-      );
+      const isolation = await prepareIsolation(runtime, resolvedTarget);
       return await terminalManager.startWorkspace(
         sessionId,
         resolvedTarget,
@@ -153,7 +201,8 @@ function registerIpcHandlers(): void {
   });
 
   ipcMain.handle(IPC.terminalResize, (_event, input: unknown) => {
-    const { sessionId, terminalId, cols, rows } = terminalResizeInput.parse(input);
+    const { sessionId, terminalId, cols, rows } =
+      terminalResizeInput.parse(input);
     terminalManager.resize(sessionId, terminalId, cols, rows);
   });
 
@@ -163,7 +212,7 @@ function registerIpcHandlers(): void {
   });
 }
 
-async function createWindow(): Promise<void> {
+async function createWindow(show = true): Promise<void> {
   const applicationIcon = join(
     app.getAppPath(),
     "assets",
@@ -176,6 +225,7 @@ async function createWindow(): Promise<void> {
     height: 940,
     minWidth: 1000,
     minHeight: 650,
+    show,
     backgroundColor: "#0b1117",
     icon: applicationIcon,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
@@ -198,7 +248,7 @@ async function createWindow(): Promise<void> {
   if (developmentUrl) {
     await mainWindow.loadURL(developmentUrl);
   } else {
-    await mainWindow.loadFile(join(__dirname, "renderer", "index.html"));
+    await mainWindow.loadURL(RENDERER_URL);
   }
 }
 
@@ -206,36 +256,54 @@ if (!hasSingleInstanceLock) {
   app.quit();
 }
 
-app.whenReady().then(async () => {
-  if (!hasSingleInstanceLock) {
-    return;
-  }
-  await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
-  if (process.platform === "darwin") {
-    app.dock?.setIcon(
-      join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
-    );
-  }
-  workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
-  await workspaceRegistry.initialize();
-  registerIpcHandlers();
-  await createWindow();
-
-  app.on("activate", async () => {
-    if (BrowserWindow.getAllWindows().length === 0) {
-      await createWindow();
+void app
+  .whenReady()
+  .then(async () => {
+    if (!hasSingleInstanceLock) {
+      return;
     }
-  });
+    await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
+    registerRendererProtocol();
+    if (process.platform === "darwin") {
+      app.dock?.setIcon(
+        join(app.getAppPath(), "assets", "icons", "png", "256x256.png"),
+      );
+    }
+    workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
+    await workspaceRegistry.initialize();
+    registerIpcHandlers();
+    await createWindow(!isPackagedSmokeTest);
 
-  app.on("second-instance", () => {
-    if (mainWindow) {
-      if (mainWindow.isMinimized()) {
-        mainWindow.restore();
+    if (isPackagedSmokeTest) {
+      await verifyPackagedTerminalWorker(
+        join(__dirname, "terminal-worker.cjs"),
+        app.getPath("temp"),
+      );
+      console.log("OpsCapsule packaged application verification passed.");
+      mainWindow?.destroy();
+      app.quit();
+      return;
+    }
+
+    app.on("activate", async () => {
+      if (BrowserWindow.getAllWindows().length === 0) {
+        await createWindow();
       }
-      mainWindow.focus();
-    }
+    });
+
+    app.on("second-instance", () => {
+      if (mainWindow) {
+        if (mainWindow.isMinimized()) {
+          mainWindow.restore();
+        }
+        mainWindow.focus();
+      }
+    });
+  })
+  .catch((error: unknown) => {
+    console.error("OpsCapsule failed to start:", error);
+    app.exit(1);
   });
-});
 
 app.on("before-quit", () => void terminalManager.stopAll());
 app.on("window-all-closed", () => {
