@@ -38,6 +38,8 @@
     "verify:terminal-worker": "npm run build:main && electron scripts/verify-terminal-worker.cjs",
     "preverify:package": "npm run check:node",
     "verify:package": "node scripts/verify-packaged-app.mjs",
+    "verify:release-tag": "node scripts/verify-release-tag.mjs",
+    "prepare:release": "node scripts/prepare-release-artifacts.mjs",
     "start": "npm run build && electron .",
     "postinstall": "node scripts/check-node-version.mjs && electron-rebuild -f -w node-pty"
   },

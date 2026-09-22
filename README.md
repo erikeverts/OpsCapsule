@@ -86,8 +86,11 @@ npm run verify:terminal-worker
 ```
 
 The macOS packaging foundation builds an ad-hoc-signed application bundle and
-ZIP/DMG artifacts. OpsCapsule's own terminal worker uses Electron's embedded
-Node.js; configured third-party agent commands remain external dependencies.
+ZIP/DMG artifacts. Tagged versions are published as clearly marked, unnotarized
+GitHub prereleases for Apple Silicon; the release workflow can also be run
+manually as a non-publishing build. OpsCapsule's own terminal worker uses
+Electron's embedded Node.js; configured third-party agent commands remain
+external dependencies.
 
 ```sh
 # Build and verify the application bundle.
@@ -97,8 +100,8 @@ npm run package && npm run verify:package
 npm run make && npm run verify:package
 ```
 
-See [packaging](docs/packaging.md) for artifact layout, hardening decisions,
-verification, and the remaining public-release work.
+See [packaging](docs/packaging.md) for artifact layout, release procedure,
+verification, Gatekeeper expectations, and the remaining signing work.
 
 See [workspace manifests](docs/workspace-manifests.md),
 [ADR 0001](docs/adr/0001-electron-typescript-spike.md),

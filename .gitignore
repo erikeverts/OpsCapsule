@@ -2,5 +2,6 @@ node_modules/
 dist/
 coverage/
 out/
+release/
 .DS_Store
 *.log

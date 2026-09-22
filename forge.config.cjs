@@ -13,8 +13,8 @@ module.exports = {
     appCategoryType: "public.app-category.developer-tools",
     executableName: "OpsCapsule",
     icon: iconByPlatform[process.platform],
-    // Keep local arm64 builds structurally valid after rebranding and flipping
-    // fuses. Release builds will replace this ad-hoc identity with Developer ID.
+    // Keep preview builds structurally valid after rebranding and flipping
+    // fuses. A future trusted release will replace this with Developer ID.
     osxSign: {
       identity: "-",
       identityValidation: false,
