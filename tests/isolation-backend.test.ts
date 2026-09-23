@@ -20,13 +20,18 @@ import { allowsPublicDestination } from "../src/main/isolation/public-network.js
 
 const executeFile = promisify(execFile);
 const temporaryDirectories: string[] = [];
+// This guard must stay aligned with checkSandboxRuntimeAvailability: the
+// backend refuses to prepare unless sandbox-exec works *and* ripgrep is on
+// PATH, so a guard that only probes sandbox-exec turns a missing host
+// dependency into a test failure instead of a skip.
 const macOsSandboxAvailable =
   process.platform === "darwin" &&
   spawnSync(
     "/usr/bin/sandbox-exec",
     ["-p", "(version 1)\n(allow default)", "/usr/bin/true"],
     { stdio: "ignore" },
-  ).status === 0;
+  ).status === 0 &&
+  spawnSync("rg", ["--version"], { stdio: "ignore" }).status === 0;
 
 afterEach(async () => {
   await Promise.all(
