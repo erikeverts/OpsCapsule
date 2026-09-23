@@ -63,6 +63,13 @@ jobs:
       - name: Audit runtime dependencies
         run: npm audit --omit=dev --audit-level=high
 
+      # Enforced macOS isolation requires ripgrep at runtime, and the sandbox
+      # acceptance test skips itself when it is absent. Installing it here
+      # keeps the isolation guarantee genuinely exercised before a release is
+      # produced rather than silently unverified.
+      - name: Install isolation runtime dependencies
+        run: brew install ripgrep
+
       - name: Run automated tests
         run: npm test
 
