@@ -24,4 +24,10 @@ export interface IsolationPreparationContext {
     mode: "public" | "deny" | "allowlist";
     allowedDomains: string[];
   };
+  /**
+   * Absolute path of the one unix socket this capsule session may reach: its
+   * own credential broker. Undefined when no credentials are brokered, in
+   * which case the capsule keeps no channel to the main process at all.
+   */
+  brokerSocket?: string;
 }

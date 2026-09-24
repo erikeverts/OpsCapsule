@@ -40,6 +40,7 @@ export function buildSandboxRuntimeSettings(options: {
   readWritePaths: string[];
   network: IsolationPreparationContext["network"];
   userHome: string;
+  brokerSocket?: string;
 }): SandboxRuntimeSettings {
   // Sandbox Runtime deliberately rejects "*" in an allowlist. Public mode
   // uses an empty list here and an explicit approval callback in our worker;
@@ -54,7 +55,11 @@ export function buildSandboxRuntimeSettings(options: {
       allowedDomains,
       deniedDomains: options.network.mode === "deny" ? ["*"] : [],
       strictAllowlist: options.network.mode !== "public",
-      allowUnixSockets: [],
+      // The capsule's only route back to the application. Exactly one
+      // absolute path per session; glob patterns are not honoured by the
+      // sandbox, which usefully forces the narrowest possible allowance.
+      // allowAllUnixSockets and allowLocalBinding stay false unconditionally.
+      allowUnixSockets: options.brokerSocket ? [options.brokerSocket] : [],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
     },
@@ -221,6 +226,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
       readWritePaths,
       network: this.context.network,
       userHome: homedir(),
+      brokerSocket: this.context.brokerSocket,
     });
 
     await writeFile(
