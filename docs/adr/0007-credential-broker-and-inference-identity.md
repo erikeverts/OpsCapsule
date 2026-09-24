@@ -2,6 +2,7 @@
 
 - Status: Proposed
 - Date: 2026-09-23
+- Spike: `src/main/credentials/`, `tests/credential-broker-spike.test.ts`
 
 ## Context
 
@@ -129,25 +130,61 @@ The capsule's AWS configuration contains two clearly named profiles:
 
 - the **operational** profile, which remains the default and remains the value of
   `AWS_PROFILE`; and
-- the **inference** profile, which is present but never the default.
+- the **inference** profile, which is present but never the default and is never
+  named anywhere in the process environment.
 
 Shell panes and every operational command the agent runs continue to resolve the
 operational identity with no change in behaviour. The inference identity is
-selected *by profile name* in adapter-materialised provider configuration, so
-selection travels through the model provider's own configuration path instead of
-the process environment.
+selected through the agent's own configuration, so selection travels through the
+model provider's configuration path instead of the process environment.
 
-Where an agent supports only environment-based Bedrock configuration and cannot
-name a profile, the fallback is a loopback signing proxy: the broker terminates
-the agent's Bedrock requests on localhost, signs them with the inference
-identity in the main process, and forwards them. The agent then holds an
-endpoint, not a credential. The fallback is explicitly preferred over exporting
-inference credentials into the agent environment, because the latter would leak
-into every child process the agent spawns.
+Both supported adapters provide a suitable mechanism, and this was verified
+against vendor documentation rather than assumed:
+
+- **OpenCode** accepts `provider."amazon-bedrock".options.profile`, selecting an
+  AWS profile by name, and documents that configuration-file options take
+  precedence over environment variables.
+- **Claude Code** provides `awsCredentialExport`, a command returning credential
+  JSON, documented for precisely this case: "when your Amazon Bedrock account
+  requires cross-account credentials that differ from the ones the default
+  provider chain would resolve."
+
+A single broker payload satisfies both consumers. AWS `credential_process`
+requires `Version: 1` with top-level credential keys, and Claude Code documents
+that it also accepts that same flat shape, so the helper needs no per-consumer
+branching.
+
+For an adapter that offers neither mechanism, the fallback is a loopback signing
+proxy: the broker terminates the agent's Bedrock requests on localhost, signs
+them with the inference identity in the main process, and forwards them. This is
+now a contingency for unknown future adapters rather than part of the primary
+design. It remains strictly preferable to exporting inference credentials into
+the agent environment, because those would reach every child process the agent
+spawns.
 
 An inference identity is optional. When none is configured, behaviour is
 unchanged and Bedrock continues to use the target identity, which remains a
 legitimate configuration.
+
+### Helper constraints
+
+The helper runs inside the capsule sandbox and is subject to constraints that
+the consuming agents impose:
+
+- **It must never read stdin.** Claude Code times out credential-chain
+  resolution after 60 seconds and names "a `credential_process` helper that
+  waits for input it can't receive" as a known failure mode. An interactive
+  helper would hang the agent rather than fail it.
+- **It must take its request from the environment, not argv.** Process arguments
+  are readable by other processes on the machine, which inside a capsule
+  includes the agent and both shell panes.
+- **Its output must be treated as secret.** Claude Code captures
+  `awsCredentialExport` output silently and does not display it; OpsCapsule must
+  not log it either.
+- **STS must be reachable.** Claude Code independently calls
+  `GetCallerIdentity` before refreshing credentials. Under a capsule network
+  policy of `deny`, that call fails, so any target using Bedrock needs an
+  allowlist entry for STS.
 
 ### Verification and display
 
@@ -175,6 +212,35 @@ effect on the target connection, and revocation of a target connection has no
 effect on an inference identity; the two lifecycles are independent by
 construction.
 
+## Spike
+
+A spike accompanies this ADR in `src/main/credentials/` with its proof in
+`tests/credential-broker-spike.test.ts`. It is deliberately not wired into the
+launch path. What it establishes:
+
+- **The helper executes inside the enforced boundary.** A `credential_process`
+  helper spawned as a child of a sandboxed process under a `deny` network
+  policy runs and returns its payload to the caller. This was the one question
+  vendor documentation could not answer, because it concerns OpsCapsule's own
+  sandbox rather than the agents.
+- **One payload serves both consumers**, matching the AWS `credential_process`
+  contract and Claude Code's accepted flat shape.
+- **The authority fails closed** on a wrong session token, on a credential
+  reference outside the session's scope, and after revocation.
+- **The environment never names the inference identity**, which is the
+  invariant that keeps operational commands on the target identity.
+
+The spike also closed a bypass that the existing design did not cover. The
+manifest schema rejects `AWS_*` names in `profile.environment`, but a managed
+Claude Code `settings.json` carries its own `env` block and
+`.claude/settings.json` is an allowed managed destination. An `AWS_PROFILE`
+placed there would not be caught by the schema. The spike confirms that
+`inspectAgentConfigurationFile` does flag it as an `identity` danger, which is
+already promoted to a hard failure at both readiness and launch — and that the
+legitimate OpenCode Bedrock profile selection is *not* flagged, so the guard
+does not block the mechanism this ADR depends on. Both behaviours were
+previously untested and are now regression-covered.
+
 ## Consequences
 
 - A user-owned provider identity can be authenticated once and reused at an
@@ -193,8 +259,12 @@ construction.
 - `safeStorage` ties stored secrets to the machine and OS user account. Secrets
   do not migrate with a workspace manifest, which is intended, but it must be
   clear in the UI that a manifest alone does not carry authentication.
-- The loopback signing proxy, if implemented, places OpsCapsule on the inference
-  data path. It must not log request or response bodies.
+- The loopback signing proxy, if it is ever needed for a future adapter, would
+  place OpsCapsule on the inference data path. It must not log request or
+  response bodies.
+- Bedrock-backed targets cannot run with a `deny` network policy unchanged,
+  because Claude Code's own STS `GetCallerIdentity` call must succeed. This
+  couples credential work to the network policy model.
 - Credential storage, provider OAuth brokering, AWS role brokering, identity
   verification, and the loopback proxy are separable slices and are expected to
   land incrementally rather than as one change.
