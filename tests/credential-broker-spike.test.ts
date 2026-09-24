@@ -1,5 +1,6 @@
 import { execFile, spawnSync } from "node:child_process";
 import { chmod, mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { createServer } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { describe, expect, it, afterEach } from "vitest";
@@ -16,7 +17,6 @@ import {
   INFERENCE_PROFILE_NAME,
 } from "../src/main/credentials/capsule-aws-config.js";
 import { inspectAgentConfigurationFile } from "../src/main/local-resources.js";
-import { SandboxRuntimeIsolationBackend } from "../src/main/isolation/sandbox-runtime.js";
 import {
   cleanupSandboxCommand,
   initializeSandboxRuntime,
@@ -229,95 +229,155 @@ describe("agent configuration cannot smuggle an AWS identity", () => {
 });
 
 describe.skipIf(!macOsSandboxAvailable)(
-  "broker helper execution inside the capsule boundary",
+  "broker helper reaches the main process from inside the capsule",
   () => {
-    it(
-      "spawns as a child of a sandboxed process and returns credentials without reading stdin",
-      async () => {
-        const base = await mkdtemp(join("/private/tmp", "oc-broker-"));
-        temporaryDirectories.push(base);
-        const allowed = join(base, "allowed");
-        const root = join(base, "runtime");
-        const home = join(root, "home");
-        const sessionTemp = join(root, "tmp");
-        await Promise.all(
-          [allowed, home, sessionTemp, join(base, "target-state")].map((path) =>
-            mkdir(path, { recursive: true }),
-          ),
-        );
+    /**
+     * Runs the real broker topology: the credential-holding authority lives in
+     * this (unsandboxed) process and is reachable only over a unix socket; the
+     * helper inside the capsule is a thin client carrying no secret.
+     *
+     * `allowOwnSocket` selects whether the capsule is permitted to reach the
+     * socket that belongs to its own session.
+     */
+    async function probeBroker(allowOwnSocket: boolean) {
+      const base = await mkdtemp(join("/private/tmp", "oc-broker-"));
+      temporaryDirectories.push(base);
+      const allowed = join(base, "allowed");
+      await mkdir(allowed, { recursive: true });
+      const socketPath = join(allowed, "broker.sock");
 
-        // Stand-in for the broker helper. The real helper is an OpsCapsule
-        // executable; what is under test here is whether the sandbox permits
-        // an AWS client to spawn it at all and read its stdout.
-        const helper = join(allowed, "broker");
-        await writeFile(
-          helper,
-          [
-            "#!/bin/sh",
-            'if [ -z "$OPSCAPSULE_BROKER_TOKEN" ]; then exit 1; fi',
-            `printf '%s' '${formatBrokeredCredentials(credentials).trim()}'`,
-            "",
-          ].join("\n"),
-        );
-        await chmod(helper, 0o700);
+      // Main process: holds the secret, authenticates, mints a session.
+      const authority = createSessionBrokerAuthority("session-token", [
+        "central-inference",
+      ]);
+      const server = createServer((socket) => {
+        socket.once("data", (chunk) => {
+          void (async () => {
+            try {
+              socket.end(
+                await handleBrokerRequest(
+                  JSON.parse(chunk.toString()),
+                  authority,
+                  async () => ({
+                    ...credentials,
+                    accessKeyId: "ASIAFROMMAINPROCESS",
+                  }),
+                ),
+              );
+            } catch (error) {
+              socket.end(`ERROR ${(error as Error).message}`);
+            }
+          })();
+        });
+      });
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
 
-        const runtime = {
-          root,
-          home,
-          temp: sessionTemp,
-          kubeconfig: join(root, "kubeconfig.yaml"),
-          sandboxConfig: join(root, "sandbox.json"),
-          targetState: join(base, "target-state"),
-          agentState: join(base, "target-state", "agents", "example"),
-        };
-        const isolation = await new SandboxRuntimeIsolationBackend({
-          runtime,
-          readOnlyPaths: [],
-          readWritePaths: [allowed],
-          network: { mode: "deny", allowedDomains: [] },
-        }).prepare();
-        if (isolation.execution.backend !== "sandbox-runtime") {
-          throw new Error("Expected Sandbox Runtime execution");
-        }
-        await initializeSandboxRuntime(isolation.execution);
-
-        const environment = {
-          ...process.env,
-          HOME: home,
-          TMPDIR: sessionTemp,
-          TMP: sessionTemp,
-          TEMP: sessionTemp,
-          OPSCAPSULE_BROKER_TOKEN: "session-token",
-          OPSCAPSULE_BROKER_REFERENCE: "central-inference",
-        } as Record<string, string>;
-
-        // `sh -c` stands in for the AWS client: a process already inside the
-        // sandbox that spawns the helper and captures its stdout.
-        const launch = await wrapSandboxedLaunch(
-          {
-            command: "/bin/sh",
-            args: ["-c", '"$1"', "child", helper],
-            cwd: allowed,
-            env: environment,
+      const settingsPath = join(base, "sandbox.json");
+      await writeFile(
+        settingsPath,
+        JSON.stringify({
+          network: {
+            allowedDomains: [],
+            deniedDomains: ["*"],
+            strictAllowlist: true,
+            // Only an absolute path is honoured here; glob patterns such as
+            // "**/broker.sock" are not, which forces the narrowest allowance.
+            allowUnixSockets: allowOwnSocket ? [socketPath] : [],
+            allowAllUnixSockets: false,
+            allowLocalBinding: false,
           },
-          "broker-helper",
-        );
+          filesystem: {
+            denyRead: [],
+            allowRead: [allowed],
+            allowWrite: [allowed],
+            denyWrite: [],
+          },
+          enableWeakerNestedSandbox: false,
+          enableWeakerNetworkIsolation: false,
+          allowAppleEvents: false,
+          allowPty: true,
+        }),
+      );
+
+      // The helper relays the session request and holds no credential itself.
+      const helper = join(allowed, "broker");
+      await writeFile(
+        helper,
+        [
+          "#!/bin/sh",
+          'if [ -z "$OPSCAPSULE_BROKER_TOKEN" ]; then exit 64; fi',
+          "printf '{\"token\":\"%s\",\"referenceId\":\"%s\"}'" +
+            ' "$OPSCAPSULE_BROKER_TOKEN" "$OPSCAPSULE_BROKER_REFERENCE"' +
+            ` | /usr/bin/nc -U "${socketPath}"`,
+          "",
+        ].join("\n"),
+      );
+      await chmod(helper, 0o700);
+
+      await initializeSandboxRuntime({
+        backend: "sandbox-runtime",
+        settingsPath,
+        networkMode: "deny",
+      });
+      const launch = await wrapSandboxedLaunch(
+        {
+          command: "/bin/sh",
+          args: ["-c", '"$1"', "child", helper],
+          cwd: allowed,
+          env: {
+            ...process.env,
+            OPSCAPSULE_BROKER_TOKEN: "session-token",
+            OPSCAPSULE_BROKER_REFERENCE: "central-inference",
+          } as Record<string, string>,
+        },
+        "broker-helper",
+      );
+
+      let stdout = "";
+      let blocked = false;
+      try {
         const result = await executeFile(launch.command, launch.args, {
           cwd: launch.cwd,
           env: launch.env,
           timeout: 10_000,
         });
-        cleanupSandboxCommand();
+        stdout = result.stdout;
+      } catch {
+        blocked = true;
+      }
+      cleanupSandboxCommand();
+      await resetSandboxRuntime();
+      server.close();
+      return { blocked, stdout, launch };
+    }
 
-        const payload = JSON.parse(result.stdout);
+    it(
+      "is blocked by the isolation settings OpsCapsule ships today",
+      async () => {
+        // Current production config sets allowUnixSockets to []. A broker that
+        // authenticates outside the sandbox is therefore impossible to build
+        // without an explicit, narrow allowance being added first.
+        const { blocked } = await probeBroker(false);
+        expect(blocked).toBe(true);
+      },
+      20_000,
+    );
+
+    it(
+      "succeeds with only its own session socket allowed",
+      async () => {
+        const { blocked, stdout, launch } = await probeBroker(true);
+        expect(blocked).toBe(false);
+
+        const payload = JSON.parse(stdout);
         expect(payload.Version).toBe(1);
-        expect(payload.AccessKeyId).toBe("ASIAEXAMPLE");
+        // Proves the credential was minted in the main process and delivered
+        // into the capsule, rather than ever being stored inside it.
+        expect(payload.AccessKeyId).toBe("ASIAFROMMAINPROCESS");
 
-        // The helper must not depend on the session token arriving through
-        // argv, where any other process in the capsule could read it.
+        // The session token must not be readable via `ps` by the agent or the
+        // shell panes sharing the capsule.
         expect(launch.args.join(" ")).not.toContain("session-token");
-
-        await resetSandboxRuntime();
       },
       20_000,
     );

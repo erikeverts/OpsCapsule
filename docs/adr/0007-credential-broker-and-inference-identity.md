@@ -91,32 +91,70 @@ secret cannot be decrypted fails closed and is reported as unauthenticated.
 
 Sharing scope is explicit and chosen by the user, not inherited by accident:
 
-- `user` — one login reused by every workspace and target; appropriate for a
-  personal provider identity such as GitHub Copilot;
+- `user` — one login reused by every workspace and target; the expected scope
+  for a personal provider identity such as GitHub Copilot, and for a central
+  Bedrock inference account;
 - `workspace` — shared by all targets within one workspace, typically a
   customer or engagement boundary; and
 - `target` — the current behaviour, retained for anything that must not cross an
   environment boundary.
+
+The two identities normally sit at different scopes, and that asymmetry is the
+point of the design. A **global, user-scoped inference identity** is
+authenticated once and reused everywhere, while the **operational identity stays
+target-scoped** so that development, staging, and production never share one.
+Scope is a property of the credential reference, so a workspace-scoped inference
+account remains expressible for an engagement that bills its own inference.
 
 The scope of a credential is displayed wherever the credential is used. Widening
 a scope is an explicit user action, never a migration side effect.
 
 ### Brokered delivery, not injection
 
-Credentials are delivered through a **broker helper** rather than an environment
-variable or a file written into the capsule. OpsCapsule materialises a named AWS
-profile whose `credential_process` invokes the helper. The helper is
-authenticated by a per-session, single-target token that is valid only for the
-lifetime of that capsule, and it returns short-lived credentials in the standard
-`credential_process` JSON form.
+**Authentication happens in the main process, outside the sandbox.** The main
+process owns the credential store, performs every provider login and role
+assumption, and mints a short-lived session. A capsule never holds a long-lived
+secret and never performs authentication itself.
+
+What enters the capsule is only the session. OpsCapsule materialises a named AWS
+profile whose `credential_process` invokes a **broker helper**. That helper is a
+thin client: it carries no credential, reads its session token and credential
+reference from its environment, relays them to the main process over a unix
+socket, and writes the returned short-lived credentials to stdout in the
+standard `credential_process` JSON form. The token is bound to one session and
+to an explicit set of credential references, so a capsule cannot request a
+credential its target does not use.
 
 This gives several properties that injection cannot:
 
 - no credential is at rest inside the capsule filesystem or environment;
-- credentials expire with the session and can be revoked immediately;
+- credentials expire with the session and can be revoked immediately, because
+  the issuing authority is outside the boundary and stays under our control;
 - every issuance is attributable to a session, target, and reference; and
 - the AWS SDK and CLI already understand the mechanism, so OpsCapsule remains
   free of a bundled AWS SDK and stays agent-agnostic.
+
+### The isolation cost of a broker channel
+
+A capsule currently has **no channel to the main process at all**.
+`buildSandboxRuntimeSettings` sets `allowUnixSockets: []`,
+`allowAllUnixSockets: false`, and `allowLocalBinding: false`. The broker
+architecture above is therefore not implementable without deliberately opening
+one, and that is a change to the isolation boundary rather than an
+implementation detail.
+
+The decision is to allow **exactly one unix socket per capsule session**: the
+absolute path of the socket owned by that session, and nothing else.
+`allowAllUnixSockets` and `allowLocalBinding` stay `false`. The spike confirms
+that only an absolute path is honoured — glob patterns such as
+`**/broker.sock` are not — which conveniently forces the narrowest possible
+allowance rather than a pattern that could match a future attacker-chosen path.
+
+This is a real reduction in isolation and is accepted knowingly. The socket is
+the capsule's only route out to the application, so its protocol must stay
+minimal, must be request/response only, must never accept a path or command from
+the capsule, and must be treated as an untrusted input boundary with the same
+seriousness as the renderer IPC surface.
 
 Provider OAuth credentials such as Copilot follow the same principle. The broker
 materialises the provider's expected credential file into the capsule's
@@ -218,11 +256,12 @@ A spike accompanies this ADR in `src/main/credentials/` with its proof in
 `tests/credential-broker-spike.test.ts`. It is deliberately not wired into the
 launch path. What it establishes:
 
-- **The helper executes inside the enforced boundary.** A `credential_process`
-  helper spawned as a child of a sandboxed process under a `deny` network
-  policy runs and returns its payload to the caller. This was the one question
-  vendor documentation could not answer, because it concerns OpsCapsule's own
-  sandbox rather than the agents.
+- **The main process is the only credential holder, and the capsule can reach
+  it.** With the settings OpsCapsule ships today the helper is *blocked*: there
+  is no channel out of the capsule. With exactly one per-session unix socket
+  allowed, the helper reaches the authority and returns a credential minted
+  outside the boundary. Both directions are covered, so the isolation cost of
+  this ADR is measured rather than assumed.
 - **One payload serves both consumers**, matching the AWS `credential_process`
   contract and Claude Code's accepted flat shape.
 - **The authority fails closed** on a wrong session token, on a credential
@@ -265,6 +304,13 @@ previously untested and are now regression-covered.
 - Bedrock-backed targets cannot run with a `deny` network policy unchanged,
   because Claude Code's own STS `GetCallerIdentity` call must succeed. This
   couples credential work to the network policy model.
+- The capsule gains its first route back to the application. `allowUnixSockets`
+  moves from an empty list to one per-session path, which is a deliberate
+  reduction in isolation and makes the broker socket a new untrusted input
+  boundary requiring the same scrutiny as renderer IPC.
+- Issue #8, which asks the UI to distinguish configured from active isolation,
+  now has a second dimension to report: whether a capsule has a broker channel
+  open.
 - Credential storage, provider OAuth brokering, AWS role brokering, identity
   verification, and the loopback proxy are separable slices and are expected to
   land incrementally rather than as one change.
