@@ -80,6 +80,7 @@ function blankWorkspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
+    credentials: [],
     cloudConnections: [],
     kubernetesContexts: [],
     directories: [

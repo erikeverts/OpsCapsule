@@ -7,6 +7,7 @@ import {
   ipcMain,
   net,
   protocol,
+  safeStorage,
   utilityProcess,
 } from "electron";
 import {
@@ -25,6 +26,11 @@ import {
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
 import { prepareIsolation } from "./isolation/prepare.js";
+import { CredentialBrokerSession } from "./credentials/broker.js";
+import { createBrokerToken } from "./credentials/helper.js";
+import { createCredentialIssuer } from "./credentials/issuer.js";
+import { CredentialStore } from "./credentials/store.js";
+import type { CapsuleBroker } from "./terminal-manager.js";
 import {
   cleanupStaleWorkspaceRuntimes,
   cleanupWorkspaceRuntime,
@@ -176,15 +182,45 @@ function registerIpcHandlers(): void {
       sessionId,
       resolvedTarget,
     );
+    let broker: CredentialBrokerSession | undefined;
     try {
       const isolation = await prepareIsolation(runtime, resolvedTarget);
+
+      const references = [
+        resolvedTarget.credentials.operational,
+        resolvedTarget.credentials.inference,
+      ].filter((reference) => reference !== undefined);
+
+      let brokerHandle: CapsuleBroker | undefined;
+      if (runtime.brokerSocket && references.length > 0) {
+        const token = createBrokerToken();
+        const store = new CredentialStore(
+          app.getPath("userData"),
+          safeStorage,
+        );
+        broker = new CredentialBrokerSession({
+          socketPath: runtime.brokerSocket,
+          token,
+          references,
+          issue: createCredentialIssuer(store, {
+            workspaceId: resolvedTarget.workspace.manifest.metadata.id,
+            targetId: resolvedTarget.target.id,
+          }),
+        });
+        await broker.listen();
+        const session = broker;
+        brokerHandle = { token, close: () => session.close() };
+      }
+
       return await terminalManager.startWorkspace(
         sessionId,
         resolvedTarget,
         runtime,
         isolation,
+        brokerHandle,
       );
     } catch (error) {
+      await broker?.close();
       await cleanupWorkspaceRuntime(runtime);
       throw error;
     }

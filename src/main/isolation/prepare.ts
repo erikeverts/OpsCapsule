@@ -40,5 +40,6 @@ export async function prepareIsolation(
     readOnlyPaths,
     readWritePaths: [...readWritePaths, runtime.targetState],
     network: resolvedTarget.target.isolation.network,
+    brokerSocket: runtime.brokerSocket,
   }).prepare();
 }

@@ -149,6 +149,12 @@ export interface RuntimePaths {
   targetState: string;
   agentState: string;
   agentInstructions?: string;
+  /**
+   * Present only when this capsule brokers credentials. Paths only; no
+   * credential value ever crosses the IPC boundary.
+   */
+  brokerSocket?: string;
+  brokerHelper?: string;
 }
 
 export type ReadinessCheckStatus = "pass" | "warning" | "fail";

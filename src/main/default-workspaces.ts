@@ -23,6 +23,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "default-agent",
+    credentials: [],
     cloudConnections: [
       {
         id: "aws-nonprod",
@@ -134,6 +135,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "default-agent",
+    credentials: [],
     cloudConnections: [
       {
         id: "aws-staging",

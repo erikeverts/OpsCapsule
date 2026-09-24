@@ -37,6 +37,7 @@ import {
   type WorkspaceManifest,
   type WorkspaceTarget,
 } from "../shared/workspace-schema.js";
+import type { CredentialReference } from "../shared/credentials.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { seedDefaultWorkspaces } from "./default-workspaces.js";
 import {
@@ -57,6 +58,15 @@ export interface ResolvedWorkspaceTarget {
   directories: WorkspaceDirectory[];
   defaultDirectory: WorkspaceDirectory;
   agent: ResolvedAgentProfile;
+  /**
+   * Brokered identities for this target. Operational is target-scoped and
+   * stays the capsule default; inference is workspace-declared and normally
+   * user-scoped so one central account serves every target.
+   */
+  credentials: {
+    operational?: CredentialReference;
+    inference?: CredentialReference;
+  };
   summary: WorkspaceTargetSummary;
 }
 
@@ -671,6 +681,13 @@ export class WorkspaceRegistry {
       throw new Error(`Target '${target.id}' does not resolve an agent profile`);
     }
 
+    const findCredential = (id: string | undefined) =>
+      id ? workspace.manifest.credentials.find((entry) => entry.id === id) : undefined;
+    const credentials = {
+      operational: findCredential(target.operationalCredential),
+      inference: findCredential(workspace.manifest.inferenceCredential),
+    };
+
     const summary: WorkspaceTargetSummary = {
       id: target.id,
       name: target.name,
@@ -706,6 +723,7 @@ export class WorkspaceRegistry {
       directories,
       defaultDirectory,
       agent,
+      credentials,
       summary,
     };
   }

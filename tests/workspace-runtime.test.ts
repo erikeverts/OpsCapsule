@@ -378,3 +378,90 @@ describe("workspace runtime isolation", () => {
     );
   });
 });
+
+describe("brokered credentials in the launch path", () => {
+  async function prepare(options: { withCredentials: boolean }) {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-broker-"));
+    temporaryDirectories.push(baseDirectory);
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = { id: "brokered", name: "Brokered" };
+    manifest.targets = manifest.targets.slice(0, 1);
+
+    if (options.withCredentials) {
+      manifest.credentials = [
+        {
+          id: "target-operational",
+          name: "Customer production",
+          kind: "aws-profile",
+          scope: "target",
+          region: "eu-west-1",
+        },
+        {
+          id: "central-inference",
+          name: "Central Bedrock",
+          kind: "aws-profile",
+          scope: "user",
+          region: "us-east-1",
+        },
+      ];
+      manifest.inferenceCredential = "central-inference";
+      manifest.targets[0]!.operationalCredential = "target-operational";
+    }
+
+    const created = await registry.create(manifest);
+    const resolved = await registry.resolveTarget(
+      created.manifest.metadata.id,
+      created.manifest.targets[0]!.id,
+    );
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "00000000-aaaa-bbbb-cccc-000000000001",
+      resolved,
+    );
+    return { runtime, resolved };
+  }
+
+  it("gives a capsule no broker channel when no credentials are declared", async () => {
+    const { runtime } = await prepare({ withCredentials: false });
+    expect(runtime.brokerSocket).toBeUndefined();
+    expect(runtime.brokerHelper).toBeUndefined();
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("materializes a helper and two named profiles when credentials are declared", async () => {
+    const { runtime, resolved } = await prepare({ withCredentials: true });
+
+    expect(runtime.brokerSocket).toBeDefined();
+    expect(runtime.brokerHelper).toBeDefined();
+    expect(resolved.credentials.operational?.id).toBe("target-operational");
+    expect(resolved.credentials.inference?.id).toBe("central-inference");
+
+    const helper = await readFile(runtime.brokerHelper!, "utf8");
+    expect(helper).toContain("OPSCAPSULE_BROKER_TOKEN");
+    expect(helper).toContain(runtime.brokerSocket!);
+
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+    // Operational is the default profile; inference is named but not default.
+    expect(awsConfig).toContain("[default]");
+    expect(awsConfig).toContain(
+      `credential_process = ${runtime.brokerHelper} target-operational`,
+    );
+    expect(awsConfig).toContain("[profile opscapsule-inference]");
+    expect(awsConfig).toContain(
+      `credential_process = ${runtime.brokerHelper} central-inference`,
+    );
+
+    // The environment must still name only the operational identity.
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+    expect(environment.AWS_PROFILE).not.toBe("opscapsule-inference");
+    expect(JSON.stringify(environment)).not.toContain("central-inference");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
+});

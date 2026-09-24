@@ -20,6 +20,10 @@ import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import {
+  buildCapsuleAwsConfig,
+  writeBrokerHelper,
+} from "./credentials/helper.js";
+import {
   extractKubeconfigContext,
   inspectAgentConfigurationFile,
 } from "./local-resources.js";
@@ -144,6 +148,7 @@ async function prepareCloudState(
   home: string,
   targetState: string,
   resolvedTarget: ResolvedWorkspaceTarget,
+  brokerHelperPath?: string,
 ): Promise<void> {
   if (resolvedTarget.cloud?.provider !== "aws") {
     return;
@@ -156,15 +161,32 @@ async function prepareCloudState(
     }
   ).authentication;
   const destination = join(awsState, "config");
-  await stageAwsConfig(
-    authentication?.configFile
-      ? resolveConfiguredPath(
-        authentication.configFile,
-        resolvedTarget.workspace.sourcePath,
-      )
-      : undefined,
-    destination,
-  );
+
+  const { operational, inference } = resolvedTarget.credentials;
+  if (brokerHelperPath && (operational || inference)) {
+    // Brokered identities replace the imported profile chain: credentials are
+    // fetched from the main process at point of use instead of resolved from
+    // anything stored inside the capsule.
+    await writeFile(
+      destination,
+      buildCapsuleAwsConfig({
+        helperPath: brokerHelperPath,
+        operational,
+        inference,
+      }),
+      { encoding: "utf8", mode: 0o600 },
+    );
+  } else {
+    await stageAwsConfig(
+      authentication?.configFile
+        ? resolveConfiguredPath(
+          authentication.configFile,
+          resolvedTarget.workspace.sourcePath,
+        )
+        : undefined,
+      destination,
+    );
+  }
   await writeIfMissing(join(awsState, "credentials"));
   await symlink(
     awsState,
@@ -338,6 +360,14 @@ export async function createWorkspaceRuntime(
     resolvedTarget.agent.profile.id,
   );
 
+  // A capsule only gets a channel to the main process when it actually has
+  // brokered credentials. Otherwise no socket and no helper exist at all.
+  const brokersCredentials = Boolean(
+    resolvedTarget.credentials.operational ?? resolvedTarget.credentials.inference,
+  );
+  const brokerSocket = brokersCredentials ? join(root, "broker.sock") : undefined;
+  const brokerHelper = brokersCredentials ? join(root, "broker") : undefined;
+
   await Promise.all([
     mkdir(home, { recursive: true, mode: 0o700 }),
     mkdir(join(home, ".config"), { recursive: true, mode: 0o700 }),
@@ -351,7 +381,10 @@ export async function createWorkspaceRuntime(
       { encoding: "utf8", mode: 0o600 },
     );
   }
-  await prepareCloudState(home, targetState, resolvedTarget);
+  if (brokerHelper && brokerSocket) {
+    await writeBrokerHelper(brokerHelper, brokerSocket);
+  }
+  await prepareCloudState(home, targetState, resolvedTarget, brokerHelper);
   await prepareAgentState(home, agentState, resolvedTarget, agentInstructions);
   await Promise.all([
     writeKubeconfig(kubeconfig, resolvedTarget),
@@ -371,6 +404,8 @@ export async function createWorkspaceRuntime(
     targetState,
     agentState,
     ...(agentInstructions ? { agentInstructions } : {}),
+    ...(brokerSocket ? { brokerSocket } : {}),
+    ...(brokerHelper ? { brokerHelper } : {}),
   };
 }
 

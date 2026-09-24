@@ -13,6 +13,7 @@ import { CommandRuntimeAdapter } from "./runtime-adapters/command.js";
 import { prepareAgentLaunch } from "./runtime-adapters/readiness.js";
 import { RuntimeAdapterRegistry } from "./runtime-adapters/registry.js";
 import type { ProcessLaunchSpec } from "./runtime-adapters/types.js";
+import { BROKER_TOKEN_VARIABLE } from "./credentials/helper.js";
 import {
   buildWorkspaceEnvironment,
   cleanupWorkspaceRuntime,
@@ -72,6 +73,16 @@ interface SessionRecord {
   pendingStarts: Map<string, Deferred<void>>;
   workerState: "starting" | "ready" | "stopping" | "exited";
   diagnostics: string;
+  broker?: CapsuleBroker;
+}
+
+/**
+ * The broker session bound to one capsule. Held here so that stopping a
+ * session always revokes its credential authority.
+ */
+export interface CapsuleBroker {
+  readonly token: string;
+  close(): Promise<void>;
 }
 
 interface TerminalEvents {
@@ -123,8 +134,15 @@ export class TerminalManager {
     resolvedTarget: ResolvedWorkspaceTarget,
     runtime: RuntimePaths,
     isolation: PreparedIsolation,
+    broker?: CapsuleBroker,
   ): Promise<WorkspaceSession> {
-    const environment = buildWorkspaceEnvironment(runtime, resolvedTarget);
+    const environment = {
+      ...buildWorkspaceEnvironment(runtime, resolvedTarget),
+      // The session token is the capsule's only authority to request a
+      // credential. It travels in the environment rather than argv, and is
+      // worthless outside this session.
+      ...(broker ? { [BROKER_TOKEN_VARIABLE]: broker.token } : {}),
+    };
     const cwd = await realpath(resolvedTarget.defaultDirectory.path);
     const shellDefinition = {
       adapter: "command" as const,
@@ -157,6 +175,7 @@ export class TerminalManager {
       pendingStarts: new Map(),
       workerState: "starting",
       diagnostics: "",
+      broker,
     };
     this.sessions.set(sessionId, session);
     this.bindWorker(sessionId, session, isolation);
@@ -256,6 +275,9 @@ export class TerminalManager {
     } catch {
       session.worker.kill();
     }
+    // Revoke before anything else so a capsule racing teardown cannot obtain
+    // one last credential.
+    await session.broker?.close();
     for (const terminalId of session.terminalIds) {
       this.terminals.delete(terminalId);
     }
