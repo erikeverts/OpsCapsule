@@ -380,7 +380,10 @@ describe("workspace runtime isolation", () => {
 });
 
 describe("brokered credentials in the launch path", () => {
-  async function prepare(options: { withCredentials: boolean }) {
+  async function prepare(options: {
+    withCredentials: boolean;
+    kind?: "aws-profile" | "provider-oauth";
+  }) {
     const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-broker-"));
     temporaryDirectories.push(baseDirectory);
     const registry = new WorkspaceRegistry(baseDirectory);
@@ -391,24 +394,38 @@ describe("brokered credentials in the launch path", () => {
     manifest.targets = manifest.targets.slice(0, 1);
 
     if (options.withCredentials) {
-      manifest.credentials = [
-        {
-          id: "target-operational",
-          name: "Customer production",
-          kind: "aws-profile",
-          scope: "target",
-          region: "eu-west-1",
-        },
-        {
-          id: "central-inference",
-          name: "Central Bedrock",
-          kind: "aws-profile",
-          scope: "user",
-          region: "us-east-1",
-        },
-      ];
-      manifest.inferenceCredential = "central-inference";
-      manifest.targets[0]!.operationalCredential = "target-operational";
+      const kind = options.kind ?? "aws-profile";
+      if (kind === "provider-oauth") {
+        manifest.credentials = [
+          {
+            id: "central-inference",
+            name: "GitHub Copilot",
+            kind: "provider-oauth",
+            scope: "user",
+            providerId: "opencode",
+          },
+        ];
+        manifest.inferenceCredential = "central-inference";
+      } else {
+        manifest.credentials = [
+          {
+            id: "target-operational",
+            name: "Customer production",
+            kind: "aws-profile",
+            scope: "target",
+            region: "eu-west-1",
+          },
+          {
+            id: "central-inference",
+            name: "Central Bedrock",
+            kind: "aws-profile",
+            scope: "user",
+            region: "us-east-1",
+          },
+        ];
+        manifest.inferenceCredential = "central-inference";
+        manifest.targets[0]!.operationalCredential = "target-operational";
+      }
     }
 
     const created = await registry.create(manifest);
@@ -420,9 +437,22 @@ describe("brokered credentials in the launch path", () => {
       baseDirectory,
       "00000000-aaaa-bbbb-cccc-000000000001",
       resolved,
+      async () => JSON.stringify({ github: { type: "oauth", access: "tok" } }),
     );
     return { runtime, resolved };
   }
+
+  it("gives a capsule no broker channel when its credentials are materialized", async () => {
+    // A Copilot-backed capsule reads a file; nothing pulls, so it must not be
+    // granted a unix socket into the main process.
+    const { runtime } = await prepare({
+      withCredentials: true,
+      kind: "provider-oauth",
+    });
+    expect(runtime.brokerSocket).toBeUndefined();
+    expect(runtime.brokerHelper).toBeUndefined();
+    await cleanupWorkspaceRuntime(runtime);
+  });
 
   it("gives a capsule no broker channel when no credentials are declared", async () => {
     const { runtime } = await prepare({ withCredentials: false });

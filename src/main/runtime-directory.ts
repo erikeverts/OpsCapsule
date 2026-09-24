@@ -19,10 +19,9 @@ import { stringify } from "yaml";
 import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
-import {
-  buildCapsuleAwsConfig,
-  writeBrokerHelper,
-} from "./credentials/helper.js";
+import { writeBrokerHelper } from "./credentials/helper.js";
+import { CredentialDeliveryRegistry } from "./credentials/delivery/registry.js";
+import type { CredentialReference } from "../shared/credentials.js";
 import {
   extractKubeconfigContext,
   inspectAgentConfigurationFile,
@@ -148,7 +147,6 @@ async function prepareCloudState(
   home: string,
   targetState: string,
   resolvedTarget: ResolvedWorkspaceTarget,
-  brokerHelperPath?: string,
 ): Promise<void> {
   if (resolvedTarget.cloud?.provider !== "aws") {
     return;
@@ -162,31 +160,17 @@ async function prepareCloudState(
   ).authentication;
   const destination = join(awsState, "config");
 
-  const { operational, inference } = resolvedTarget.credentials;
-  if (brokerHelperPath && (operational || inference)) {
-    // Brokered identities replace the imported profile chain: credentials are
-    // fetched from the main process at point of use instead of resolved from
-    // anything stored inside the capsule.
-    await writeFile(
-      destination,
-      buildCapsuleAwsConfig({
-        helperPath: brokerHelperPath,
-        operational,
-        inference,
-      }),
-      { encoding: "utf8", mode: 0o600 },
-    );
-  } else {
-    await stageAwsConfig(
-      authentication?.configFile
-        ? resolveConfiguredPath(
-          authentication.configFile,
-          resolvedTarget.workspace.sourcePath,
-        )
-        : undefined,
-      destination,
-    );
-  }
+  // A delivery adapter overwrites this afterwards when the target brokers an
+  // AWS identity; the imported profile chain remains the fallback.
+  await stageAwsConfig(
+    authentication?.configFile
+      ? resolveConfiguredPath(
+        authentication.configFile,
+        resolvedTarget.workspace.sourcePath,
+      )
+      : undefined,
+    destination,
+  );
   await writeIfMissing(join(awsState, "credentials"));
   await symlink(
     awsState,
@@ -334,6 +318,12 @@ export async function createWorkspaceRuntime(
   baseDirectory: string,
   sessionId: string,
   resolvedTarget: ResolvedWorkspaceTarget,
+  /**
+   * Supplied by the main process so materialize-based delivery can read a
+   * stored secret. Left undefined by callers that only use pull-based
+   * delivery, which never reads one.
+   */
+  readSecret?: (reference: CredentialReference) => Promise<string>,
 ): Promise<RuntimePaths> {
   const root = join(baseDirectory, "sessions", sessionId);
   const home = join(root, "home");
@@ -360,13 +350,24 @@ export async function createWorkspaceRuntime(
     resolvedTarget.agent.profile.id,
   );
 
-  // A capsule only gets a channel to the main process when it actually has
-  // brokered credentials. Otherwise no socket and no helper exist at all.
-  const brokersCredentials = Boolean(
-    resolvedTarget.credentials.operational ?? resolvedTarget.credentials.inference,
+  // A capsule only gets a channel to the main process when a delivery adapter
+  // actually pulls. Credentials that are materialized at launch, such as a
+  // provider OAuth token, need no channel, so a capsule using only those keeps
+  // allowUnixSockets empty and opens no hole in the sandbox.
+  const delivery = new CredentialDeliveryRegistry();
+  const assignments = [
+    resolvedTarget.credentials.operational
+      ? { role: "operational" as const, reference: resolvedTarget.credentials.operational }
+      : undefined,
+    resolvedTarget.credentials.inference
+      ? { role: "inference" as const, reference: resolvedTarget.credentials.inference }
+      : undefined,
+  ].filter((assignment) => assignment !== undefined);
+  const needsBrokerChannel = delivery.requiresBrokerChannel(
+    assignments.map(({ reference }) => reference),
   );
-  const brokerSocket = brokersCredentials ? join(root, "broker.sock") : undefined;
-  const brokerHelper = brokersCredentials ? join(root, "broker") : undefined;
+  const brokerSocket = needsBrokerChannel ? join(root, "broker.sock") : undefined;
+  const brokerHelper = needsBrokerChannel ? join(root, "broker") : undefined;
 
   await Promise.all([
     mkdir(home, { recursive: true, mode: 0o700 }),
@@ -384,8 +385,23 @@ export async function createWorkspaceRuntime(
   if (brokerHelper && brokerSocket) {
     await writeBrokerHelper(brokerHelper, brokerSocket);
   }
-  await prepareCloudState(home, targetState, resolvedTarget, brokerHelper);
+  await prepareCloudState(home, targetState, resolvedTarget);
   await prepareAgentState(home, agentState, resolvedTarget, agentInstructions);
+  if (assignments.length > 0) {
+    await delivery.prepare({
+      helperPath: brokerHelper,
+      targetState,
+      agentState,
+      assignments,
+      readSecret:
+        readSecret ??
+        (async (reference) => {
+          throw new Error(
+            `No credential reader is available for '${reference.id}'.`,
+          );
+        }),
+    });
+  }
   await Promise.all([
     writeKubeconfig(kubeconfig, resolvedTarget),
     writeShellConfiguration(

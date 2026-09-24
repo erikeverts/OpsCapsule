@@ -1,7 +1,5 @@
-import type {
-  BrokeredCredentials,
-  CredentialIssuer,
-} from "./broker.js";
+import type { CredentialIssuer } from "./broker.js";
+import { CredentialDeliveryRegistry } from "./delivery/registry.js";
 import {
   CredentialStore,
   scopeContext,
@@ -9,42 +7,32 @@ import {
 } from "./store.js";
 
 /**
- * Turns a stored secret into the short-lived credentials handed to a capsule.
+ * Reads a stored secret and hands it to the delivery adapter for formatting.
  *
- * The stored payload is the credential material the user authenticated with.
+ * The issuer stays provider-neutral: it never inspects the credential shape,
+ * so supporting a new provider means adding a delivery adapter rather than
+ * editing the broker path.
+ *
  * Minting genuinely short-lived credentials through STS AssumeRole is a
- * separate slice; until then an `aws-role` reference is refused rather than
+ * separate slice. Until then an `aws-role` reference is refused rather than
  * silently treated as a long-lived credential, so nothing claims a lifetime it
  * does not have.
  */
 export function createCredentialIssuer(
   store: CredentialStore,
   context: Required<CredentialStoreContext>,
+  delivery = new CredentialDeliveryRegistry(),
 ): CredentialIssuer {
   return async (reference) => {
-    if (reference.kind === "provider-oauth") {
-      throw new Error(
-        `Credential reference '${reference.id}' is a provider login and is not delivered over the AWS broker path.`,
-      );
-    }
     if (reference.kind === "aws-role") {
       throw new Error(
         `Credential reference '${reference.id}' requires STS role assumption, which is not implemented yet.`,
       );
     }
-
-    const raw = await store.read(reference, scopeContext(reference.scope, context));
-    const parsed = JSON.parse(raw) as Partial<BrokeredCredentials>;
-    if (!parsed.accessKeyId || !parsed.secretAccessKey || !parsed.sessionToken) {
-      throw new Error(
-        `Stored credential '${reference.id}' is missing required fields.`,
-      );
-    }
-    return {
-      accessKeyId: parsed.accessKeyId,
-      secretAccessKey: parsed.secretAccessKey,
-      sessionToken: parsed.sessionToken,
-      ...(parsed.expiration ? { expiration: parsed.expiration } : {}),
-    };
+    const secret = await store.read(
+      reference,
+      scopeContext(reference.scope, context),
+    );
+    return delivery.formatResponse(reference, secret);
   };
 }

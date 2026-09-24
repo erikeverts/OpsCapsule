@@ -29,7 +29,7 @@ import { prepareIsolation } from "./isolation/prepare.js";
 import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
-import { CredentialStore } from "./credentials/store.js";
+import { CredentialStore, scopeContext } from "./credentials/store.js";
 import type { CapsuleBroker } from "./terminal-manager.js";
 import {
   cleanupStaleWorkspaceRuntimes,
@@ -177,10 +177,23 @@ function registerIpcHandlers(): void {
       targetId,
     );
     const sessionId = terminalManager.createSessionId();
+    const credentialStore = new CredentialStore(
+      app.getPath("userData"),
+      safeStorage,
+    );
+    const credentialContext = {
+      workspaceId: resolvedTarget.workspace.manifest.metadata.id,
+      targetId: resolvedTarget.target.id,
+    };
     const runtime = await createWorkspaceRuntime(
       app.getPath("userData"),
       sessionId,
       resolvedTarget,
+      (reference) =>
+        credentialStore.read(
+          reference,
+          scopeContext(reference.scope, credentialContext),
+        ),
     );
     let broker: CredentialBrokerSession | undefined;
     try {
@@ -194,18 +207,11 @@ function registerIpcHandlers(): void {
       let brokerHandle: CapsuleBroker | undefined;
       if (runtime.brokerSocket && references.length > 0) {
         const token = createBrokerToken();
-        const store = new CredentialStore(
-          app.getPath("userData"),
-          safeStorage,
-        );
         broker = new CredentialBrokerSession({
           socketPath: runtime.brokerSocket,
           token,
           references,
-          issue: createCredentialIssuer(store, {
-            workspaceId: resolvedTarget.workspace.manifest.metadata.id,
-            targetId: resolvedTarget.target.id,
-          }),
+          issue: createCredentialIssuer(credentialStore, credentialContext),
         });
         await broker.listen();
         const session = broker;

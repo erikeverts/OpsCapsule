@@ -32,33 +32,15 @@ const brokerRequestSchema = z
 
 export type BrokerRequest = z.infer<typeof brokerRequestSchema>;
 
-export interface BrokeredCredentials {
-  readonly accessKeyId: string;
-  readonly secretAccessKey: string;
-  readonly sessionToken: string;
-  readonly expiration?: string;
-}
-
+/**
+ * The broker is provider-neutral. It authenticates the request, enforces
+ * scope, and returns an already-formatted payload. What that payload looks
+ * like belongs to the delivery adapter for the credential's kind, so adding a
+ * provider never means changing the broker.
+ */
 export type CredentialIssuer = (
   reference: CredentialReference,
-) => Promise<BrokeredCredentials>;
-
-/**
- * A single payload satisfying both consumers. `Version: 1` with top-level keys
- * is the AWS `credential_process` contract, and Claude Code documents that it
- * also accepts that same flat shape for `awsCredentialExport`.
- */
-export function formatBrokeredCredentials(
-  credentials: BrokeredCredentials,
-): string {
-  return `${JSON.stringify({
-    Version: 1,
-    AccessKeyId: credentials.accessKeyId,
-    SecretAccessKey: credentials.secretAccessKey,
-    SessionToken: credentials.sessionToken,
-    ...(credentials.expiration ? { Expiration: credentials.expiration } : {}),
-  })}\n`;
-}
+) => Promise<string>;
 
 export interface BrokerSessionOptions {
   readonly socketPath: string;
@@ -173,9 +155,9 @@ export class CredentialBrokerSession {
       return;
     }
 
-    let credentials: BrokeredCredentials;
+    let payload: string;
     try {
-      credentials = await this.options.issue(reference);
+      payload = await this.options.issue(reference);
     } catch (error) {
       fail(request.referenceId, (error as Error).message);
       return;
@@ -183,7 +165,7 @@ export class CredentialBrokerSession {
 
     markSettled();
     this.audit({ referenceId: reference.id, outcome: "issued" });
-    socket.end(formatBrokeredCredentials(credentials));
+    socket.end(payload);
   }
 
   /** Immediate revocation. Outstanding sockets are dropped. */

@@ -127,7 +127,8 @@ credential its target does not use.
 
 This gives several properties that injection cannot:
 
-- no credential is at rest inside the capsule filesystem or environment;
+- no credential is at rest inside the capsule filesystem or environment, for
+  consumers that support pull delivery;
 - credentials expire with the session and can be revoked immediately, because
   the issuing authority is outside the boundary and stays under our control;
 - every issuance is attributable to a session, target, and reference; and
@@ -156,11 +157,32 @@ minimal, must be request/response only, must never accept a path or command from
 the capsule, and must be treated as an untrusted input boundary with the same
 seriousness as the renderer IPC surface.
 
-Provider OAuth credentials such as Copilot follow the same principle. The broker
-materialises the provider's expected credential file into the capsule's
-scope-appropriate state directory at launch, with `0600` permissions, and
-removes it on teardown. The user's real home directory is never exposed and no
-credential file is copied into a workspace resource directory.
+### Delivery is provider-specific; the broker is not
+
+`credential_process` is an AWS mechanism. GitHub Copilot has no equivalent: the
+agent simply reads a credential file. Delivery is therefore a pluggable
+adapter, selected by the credential's kind, in the same way the project already
+uses cloud adapters and runtime adapters. The broker core - authority, scope,
+audit, socket lifecycle - stays provider-neutral and returns an
+already-formatted payload, so adding a provider never means editing the broker.
+
+Two delivery shapes exist, and the difference is a security difference rather
+than a detail:
+
+- **pull**: the consumer spawns the helper when it needs a credential, as with
+  AWS `credential_process` and Claude Code's `awsCredentialExport`. Nothing is
+  stored inside the capsule, but the capsule needs a live channel out.
+- **materialize**: the consumer only reads a file, as with Copilot through
+  OpenCode. The broker writes it into scope-appropriate agent state at launch
+  with `0600` permissions and removes it on teardown. The secret is briefly at
+  rest inside the boundary, which is weaker, but the capsule needs no channel
+  at all.
+
+Because the channel is opened per delivery transport rather than whenever any
+credential exists, a capsule whose credentials are all materialized keeps
+`allowUnixSockets` empty and opens no hole in the sandbox. A materialized
+credential is never copied into a workspace resource directory, and the user's
+real home directory is never exposed.
 
 ### Two named identities, selected by name
 
@@ -304,10 +326,16 @@ previously untested and are now regression-covered.
 - Bedrock-backed targets cannot run with a `deny` network policy unchanged,
   because Claude Code's own STS `GetCallerIdentity` call must succeed. This
   couples credential work to the network policy model.
-- The capsule gains its first route back to the application. `allowUnixSockets`
-  moves from an empty list to one per-session path, which is a deliberate
-  reduction in isolation and makes the broker socket a new untrusted input
-  boundary requiring the same scrutiny as renderer IPC.
+- The capsule gains its first route back to the application, but only when a
+  pull-based credential is in use. `allowUnixSockets` moves from an empty list
+  to one per-session path, which is a deliberate reduction in isolation and
+  makes the broker socket a new untrusted input boundary requiring the same
+  scrutiny as renderer IPC. Capsules with no pull-based credential are
+  unaffected.
+- Materialized provider credentials are briefly at rest inside the capsule.
+  That is a genuine weakening relative to the pull path and is accepted only
+  because the consuming agents offer no alternative. Teardown removal is
+  therefore load-bearing rather than tidiness.
 - Issue #8, which asks the UI to distinguish configured from active isolation,
   now has a second dimension to report: whether a capsule has a broker channel
   open.

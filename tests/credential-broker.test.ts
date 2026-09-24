@@ -6,15 +6,19 @@ import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   CredentialBrokerSession,
-  formatBrokeredCredentials,
   type BrokerAuditEvent,
 } from "../src/main/credentials/broker.js";
 import {
-  buildCapsuleAwsConfig,
   createBrokerToken,
-  INFERENCE_PROFILE_NAME,
   writeBrokerHelper,
 } from "../src/main/credentials/helper.js";
+import {
+  AwsCredentialDelivery,
+  buildCapsuleAwsConfig,
+  INFERENCE_PROFILE_NAME,
+} from "../src/main/credentials/delivery/aws.js";
+import { ProviderOAuthDelivery } from "../src/main/credentials/delivery/provider-oauth.js";
+import { CredentialDeliveryRegistry } from "../src/main/credentials/delivery/registry.js";
 import {
   CredentialNotStoredError,
   CredentialStorageUnavailableError,
@@ -59,12 +63,14 @@ const inference: CredentialReference = {
   region: "us-east-1",
 };
 
+const awsDelivery = new AwsCredentialDelivery();
 const issued = {
   accessKeyId: "ASIAFROMMAINPROCESS",
   secretAccessKey: "secret",
   sessionToken: "session",
   expiration: "2026-01-01T00:00:00Z",
 };
+const awsPayload = awsDelivery.formatResponse(JSON.stringify(issued));
 
 /** Reversible stand-in for Electron safeStorage. */
 function fakeEncryptor(available = true) {
@@ -244,7 +250,7 @@ describe("broker session protocol", () => {
       socketPath,
       token: overrides.token ?? "session-token",
       references: [operational, inference],
-      issue: async () => issued,
+      issue: async () => awsPayload,
       onAudit: (event) => audit.push(event),
     });
     await session.listen();
@@ -338,7 +344,7 @@ describe("broker session protocol", () => {
       socketPath,
       token: "session-token",
       references: [inference],
-      issue: async () => issued,
+      issue: async () => awsPayload,
     });
     await session.listen();
     session.revoke();
@@ -357,7 +363,7 @@ describe("broker session protocol", () => {
       socketPath,
       token: "t",
       references: [],
-      issue: async () => issued,
+      issue: async () => awsPayload,
     });
     await session.listen();
     expect((await stat(socketPath)).mode & 0o777).toBe(0o600);
@@ -368,7 +374,7 @@ describe("broker session protocol", () => {
 
 describe("payload contract", () => {
   it("satisfies AWS credential_process and Claude Code awsCredentialExport", () => {
-    const payload = JSON.parse(formatBrokeredCredentials(issued));
+    const payload = JSON.parse(awsDelivery.formatResponse(JSON.stringify(issued)));
     expect(payload).toMatchObject({
       Version: 1,
       AccessKeyId: "ASIAFROMMAINPROCESS",
@@ -380,11 +386,13 @@ describe("payload contract", () => {
 
   it("omits Expiration when the issuer does not supply one", () => {
     const payload = JSON.parse(
-      formatBrokeredCredentials({
-        accessKeyId: "a",
-        secretAccessKey: "b",
-        sessionToken: "c",
-      }),
+      awsDelivery.formatResponse(
+        JSON.stringify({
+          accessKeyId: "a",
+          secretAccessKey: "b",
+          sessionToken: "c",
+        }),
+      ),
     );
     expect(payload.Expiration).toBeUndefined();
   });
@@ -406,13 +414,16 @@ describe.skipIf(!macOsSandboxAvailable)(
         socketPath,
         token,
         references: [operational, inference],
-        issue: async (reference) => ({
-          ...issued,
-          accessKeyId:
-            reference.id === "central-inference"
-              ? "ASIAINFERENCE"
-              : "ASIAOPERATIONAL",
-        }),
+        issue: async (reference) =>
+          new AwsCredentialDelivery().formatResponse(
+            JSON.stringify({
+              ...issued,
+              accessKeyId:
+                reference.id === "central-inference"
+                  ? "ASIAINFERENCE"
+                  : "ASIAOPERATIONAL",
+            }),
+          ),
       });
       await session.listen();
       await writeBrokerHelper(helperPath, socketPath);
@@ -552,3 +563,79 @@ describe.skipIf(!macOsSandboxAvailable)(
     );
   },
 );
+
+describe("provider-agnostic delivery", () => {
+  const registry = new CredentialDeliveryRegistry();
+  const copilot: CredentialReference = {
+    id: "copilot",
+    name: "GitHub Copilot",
+    kind: "provider-oauth",
+    scope: "user",
+    providerId: "opencode",
+  };
+
+  it("routes each credential kind to its own delivery adapter", () => {
+    expect(registry.adapterFor("aws-profile").id).toBe("aws");
+    expect(registry.adapterFor("aws-role").id).toBe("aws");
+    expect(registry.adapterFor("provider-oauth").id).toBe("provider-oauth");
+  });
+
+  it("only opens a broker channel when something actually pulls", () => {
+    // AWS pulls at point of use, so it needs the channel.
+    expect(registry.requiresBrokerChannel([operational])).toBe(true);
+    // A Copilot-only capsule is materialized at launch and needs no channel,
+    // so it must not be granted a unix socket it will never use.
+    expect(registry.requiresBrokerChannel([copilot])).toBe(false);
+    expect(registry.requiresBrokerChannel([])).toBe(false);
+    // Mixed: the AWS identity still requires it.
+    expect(registry.requiresBrokerChannel([copilot, inference])).toBe(true);
+  });
+
+  it("materializes a provider login into agent state and removes it on teardown", async () => {
+    const base = await temporaryRoot("oc-oauth-");
+    const agentState = join(base, "agents", "opencode");
+    await mkdir(agentState, { recursive: true });
+    const secret = JSON.stringify({ github: { type: "oauth", access: "tok" } });
+
+    const context = {
+      targetState: join(base, "target"),
+      agentState,
+      assignments: [{ role: "inference" as const, reference: copilot }],
+      readSecret: async () => secret,
+    };
+
+    await new ProviderOAuthDelivery().prepare(context);
+    const destination = join(agentState, "data", "opencode", "auth.json");
+    expect(await readFile(destination, "utf8")).toBe(secret);
+    expect((await stat(destination)).mode & 0o777).toBe(0o600);
+
+    // The secret must not outlive the capsule.
+    await new ProviderOAuthDelivery().teardown(context);
+    await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("refuses to serve a materialized credential over the broker channel", () => {
+    // A provider login has no credential_process contract, so asking the
+    // broker for one is a programming error rather than a silent fallback.
+    expect(() => registry.formatResponse(copilot, "{}")).toThrow(
+      /not served over the broker channel/,
+    );
+  });
+
+  it("refuses a provider it has no delivery implementation for", async () => {
+    const base = await temporaryRoot("oc-oauth-unknown-");
+    await expect(
+      new ProviderOAuthDelivery().prepare({
+        targetState: base,
+        agentState: base,
+        assignments: [
+          {
+            role: "inference",
+            reference: { ...copilot, providerId: "some-future-agent" },
+          },
+        ],
+        readSecret: async () => "{}",
+      }),
+    ).rejects.toThrow(/No credential delivery is implemented/);
+  });
+});
