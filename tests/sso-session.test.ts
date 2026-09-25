@@ -74,15 +74,53 @@ describe("SSO session severity", () => {
       describeSsoSession({
         expiresAt: new Date(Date.now() + 29 * 60_000),
         canRenewSilently: true,
+        renewableUntil: new Date(Date.now() + 59 * 86_400_000),
       }),
     ).toBe("Signed in");
   });
 
-  it("stays quiet for a session that renews itself, however close to expiry", () => {
+  it("counts down to the registration deadline, not the access token", () => {
+    // The refresh registration is what eventually forces an interactive
+    // sign-in, and without this the user would get at most an hour of notice.
+    const state = {
+      expiresAt: new Date(Date.now() + 40 * 60_000),
+      canRenewSilently: true,
+      renewableUntil: new Date(Date.now() + 6 * 3_600_000),
+    };
+    expect(describeSsoSession(state)).toBe("Signed in, 6h left");
+    expect(ssoSessionSeverity(state)).toBe("ok");
+  });
+
+  it("warns as the registration deadline arrives", () => {
+    const state = {
+      expiresAt: new Date(Date.now() + 40 * 60_000),
+      canRenewSilently: true,
+      renewableUntil: new Date(Date.now() + 10 * 60_000),
+    };
+    // The access token is still fine, but renewal is about to stop working.
+    expect(ssoSessionSeverity(state)).toBe("expiring");
+    expect(describeSsoSession(state)).toBe("Expires in 10m");
+  });
+
+  it("reports expiry once renewal is no longer possible", () => {
+    const state = {
+      expiresAt: new Date(Date.now() + 40 * 60_000),
+      canRenewSilently: true,
+      renewableUntil: new Date(Date.now() - 60_000),
+    };
+    expect(ssoSessionSeverity(state)).toBe("expired");
+  });
+
+  it("stays quiet for an expired access token that renews itself", () => {
     // Colouring a session the CLI renews without the user would train people
     // to ignore the colour.
-    const renewable = { expiresAt: new Date(Date.now() - 60_000), canRenewSilently: true };
+    const renewable = {
+      expiresAt: new Date(Date.now() - 60_000),
+      canRenewSilently: true,
+      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
+    };
     expect(ssoSessionSeverity(renewable)).toBe("ok");
+    expect(describeSsoSession(renewable)).toBe("Signed in");
   });
 
   it("has no severity for a profile that does not use SSO", () => {
@@ -138,6 +176,23 @@ describe("SSO session expiry", () => {
     });
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     expect(state!.expiresAt.toISOString()).toBe(inOneHour);
+  });
+
+  it("carries the registration deadline so renewal loss can be anticipated", async () => {
+    const paths = await fixture({
+      config: sessionConfig,
+      tokens: [
+        {
+          accessToken: "a",
+          refreshToken: "r",
+          startUrl: "https://hsp.awsapps.com/start/#/",
+          expiresAt: inOneHour,
+          registrationExpiresAt: nextYear,
+        },
+      ],
+    });
+    const state = await readSsoSessionState("ri-obs-use1-dev", paths);
+    expect(state!.renewableUntil?.toISOString()).toBe(nextYear);
   });
 
   it("does not report an expired session that renews itself", async () => {

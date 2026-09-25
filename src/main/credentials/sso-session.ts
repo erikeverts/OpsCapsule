@@ -23,6 +23,12 @@ export interface SsoSessionState {
    * a usable refresh token is not something to warn about.
    */
   readonly canRenewSilently: boolean;
+  /**
+   * When the refresh registration itself lapses, after which an interactive
+   * sign-in is unavoidable. This, not the access token, is the deadline that
+   * eventually requires the user.
+   */
+  readonly renewableUntil?: Date;
 }
 
 /**
@@ -142,7 +148,13 @@ export async function readSsoSessionState(
 
     // Several stale entries exist per start URL; the newest one is in use.
     if (!best || expiresAt.getTime() > best.expiresAt.getTime()) {
-      best = { expiresAt, canRenewSilently };
+      best = {
+        expiresAt,
+        canRenewSilently,
+        ...(canRenewSilently && registrationExpiresAt
+          ? { renewableUntil: registrationExpiresAt }
+          : {}),
+      };
     }
   }
 
@@ -161,6 +173,22 @@ export type SsoSessionSeverity = "ok" | "expiring" | "expired";
 /** Amber inside this window, because a sign-in takes a browser round trip. */
 export const SSO_EXPIRY_WARNING_MS = 15 * 60_000;
 
+/** Start showing the registration deadline a day out, so it is not a surprise. */
+export const SSO_RENEWAL_NOTICE_MS = 24 * 3_600_000;
+
+/**
+ * The moment the user will actually have to sign in again.
+ *
+ * While the CLI can renew by itself that is when the refresh registration
+ * lapses, which is months away. Once it cannot, it is whatever is left of the
+ * current access token.
+ */
+export function signInDeadline(state: SsoSessionState): Date {
+  return state.canRenewSilently && state.renewableUntil
+    ? state.renewableUntil
+    : state.expiresAt;
+}
+
 export function ssoSessionSeverity(
   state: SsoSessionState | undefined,
   now = new Date(),
@@ -168,10 +196,11 @@ export function ssoSessionSeverity(
   if (!state) {
     return undefined;
   }
-  if (state.canRenewSilently) {
+  if (state.canRenewSilently && !state.renewableUntil) {
+    // Renewable with no known registration deadline: nothing to warn about.
     return "ok";
   }
-  const remainingMs = state.expiresAt.getTime() - now.getTime();
+  const remainingMs = signInDeadline(state).getTime() - now.getTime();
   if (remainingMs <= 0) {
     return "expired";
   }
@@ -190,16 +219,16 @@ export function describeSsoSession(
   // an alarming number continuously for something that never needs action. The
   // deadline that does matter is when the refresh registration lapses, which
   // is months away and is reflected by canRenewSilently turning false.
-  if (state.canRenewSilently) {
+  // Kept short: this sits in a narrow sidebar, not a settings page.
+  const remainingMs = signInDeadline(state).getTime() - now.getTime();
+  if (remainingMs <= 0) {
+    return "Sign-in expired";
+  }
+  if (state.canRenewSilently && remainingMs > SSO_RENEWAL_NOTICE_MS) {
+    // Months away, and renewing needs nothing from the user until then.
     return "Signed in";
   }
-
-  // Kept short: this sits in a narrow sidebar, not a settings page.
-  const remainingMs = state.expiresAt.getTime() - now.getTime();
-  if (remainingMs > 0) {
-    const hours = Math.floor(remainingMs / 3_600_000);
-    const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
-    return hours > 0 ? `Signed in, ${hours}h left` : `Expires in ${minutes}m`;
-  }
-  return "Sign-in expired";
+  const hours = Math.floor(remainingMs / 3_600_000);
+  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+  return hours > 0 ? `Signed in, ${hours}h left` : `Expires in ${minutes}m`;
 }
