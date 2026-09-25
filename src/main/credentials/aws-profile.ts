@@ -4,6 +4,19 @@ import { promisify } from "node:util";
 const run = promisify(execFile);
 
 /**
+ * Resolving a *named profile* must never fall through to the EC2 instance
+ * metadata service. On a host without one, that lookup stalls until it times
+ * out, which would block a capsule launch; on a host with one, it would
+ * silently return an identity the user never selected.
+ */
+const profileResolutionEnvironment = {
+  ...process.env,
+  AWS_EC2_METADATA_DISABLED: "true",
+  AWS_METADATA_SERVICE_TIMEOUT: "1",
+  AWS_METADATA_SERVICE_NUM_ATTEMPTS: "1",
+};
+
+/**
  * AWS profiles are not secrets and are not stored by OpsCapsule.
  *
  * A reference of kind `aws-profile` names a profile on the host. Credentials
@@ -49,7 +62,7 @@ export async function exportProfileCredentials(
         "--format",
         "process",
       ],
-      { timeout: 30_000 },
+      { timeout: 30_000, env: profileResolutionEnvironment },
     );
     const payload = JSON.parse(stdout) as { AccessKeyId?: string };
     if (!payload.AccessKeyId) {
@@ -92,6 +105,7 @@ export async function ssoLogin(profile: string): Promise<void> {
   try {
     await run("aws", ["sso", "login", "--profile", profile], {
       timeout: 180_000,
+      env: profileResolutionEnvironment,
     });
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string };

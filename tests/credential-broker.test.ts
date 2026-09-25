@@ -767,14 +767,20 @@ describe("credential service", () => {
 });
 
 describe("AWS profile credentials", () => {
-  it("fails closed for a profile that cannot produce credentials", async () => {
-    // Environment-independent: whether the AWS CLI is absent or the profile is
-    // unknown, the result must be a clear refusal rather than a credential.
-    await expect(
-      exportProfileCredentials("opscapsule-does-not-exist"),
-    ).rejects.toBeInstanceOf(AwsProfileError);
-    expect(await profileResolves("opscapsule-does-not-exist")).toBe(false);
-  });
+  it(
+    "fails closed for a profile that cannot produce credentials",
+    async () => {
+      // Environment-independent: whether the AWS CLI is absent or the profile
+      // is unknown, the result must be a clear refusal rather than a
+      // credential. Instance metadata is disabled for this call, so an unknown
+      // profile fails promptly instead of stalling on a metadata lookup.
+      await expect(
+        exportProfileCredentials("opscapsule-does-not-exist"),
+      ).rejects.toBeInstanceOf(AwsProfileError);
+      expect(await profileResolves("opscapsule-does-not-exist")).toBe(false);
+    },
+    20_000,
+  );
 
   it("refuses an aws-profile reference that names no profile", async () => {
     const issue = createCredentialIssuer(
