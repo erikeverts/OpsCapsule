@@ -70,5 +70,50 @@ export interface CredentialStatus {
    */
   readonly workspaceId?: string;
   /** How prominently the state should be shown. Absent when nothing to say. */
-  readonly severity?: "ok" | "expiring" | "expired";
+  readonly severity?: SsoSessionSeverity;
+  /**
+   * When the sign-in stops being usable, as ISO 8601.
+   *
+   * Sent so the renderer can recompute the remaining time locally. A countdown
+   * rendered once goes stale immediately, and re-reading over IPC every few
+   * seconds to move a number is wasteful.
+   */
+  readonly expiresAt?: string;
+  readonly canRenewSilently?: boolean;
+}
+
+export type SsoSessionSeverity = "ok" | "expiring" | "expired";
+
+/** Amber inside this window, because a sign-in takes a browser round trip. */
+export const SSO_EXPIRY_WARNING_MS = 15 * 60_000;
+
+/**
+ * Shared so the main process and the renderer describe a session identically:
+ * main for the first paint, the renderer for every tick after it.
+ */
+export function ssoSeverityFor(
+  expiresAt: Date,
+  now: Date = new Date(),
+): SsoSessionSeverity {
+  const remainingMs = expiresAt.getTime() - now.getTime();
+  if (remainingMs <= 0) {
+    return "expired";
+  }
+  return remainingMs < SSO_EXPIRY_WARNING_MS ? "expiring" : "ok";
+}
+
+export function describeSsoExpiry(
+  expiresAt: Date,
+  canRenewSilently: boolean,
+  now: Date = new Date(),
+): string {
+  const remainingMs = expiresAt.getTime() - now.getTime();
+  if (remainingMs <= 0) {
+    // A refresh token may still rescue this, but saying so would be a guess.
+    // If it renews, the next read clears the message.
+    return canRenewSilently ? "Renewing or expired" : "Sign-in expired";
+  }
+  const hours = Math.floor(remainingMs / 3_600_000);
+  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
+  return hours > 0 ? `Signed in, ${hours}h left` : `Expires in ${minutes}m`;
 }

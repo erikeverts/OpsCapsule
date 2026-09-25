@@ -84,6 +84,9 @@ export async function credentialStatus(
           ? { detail: describeSsoSession(session)! }
           : {}),
         ...(severity ? { severity } : {}),
+        // Sent so the renderer can keep the countdown moving without IPC.
+        expiresAt: session.expiresAt.toISOString(),
+        canRenewSilently: session.canRenewSilently,
       };
     }
     const profiles =

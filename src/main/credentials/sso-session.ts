@@ -1,6 +1,11 @@
 import { readFile, readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { join } from "node:path";
+import {
+  describeSsoExpiry,
+  ssoSeverityFor,
+  type SsoSessionSeverity,
+} from "../../shared/credentials.js";
 import { iniSections } from "../local-resources.js";
 
 /**
@@ -168,11 +173,6 @@ export async function readSsoSessionState(
  * session the CLI can renew by itself is not a problem however close to expiry
  * it is, and colouring it would train people to ignore the colour.
  */
-export type SsoSessionSeverity = "ok" | "expiring" | "expired";
-
-/** Amber inside this window, because a sign-in takes a browser round trip. */
-export const SSO_EXPIRY_WARNING_MS = 15 * 60_000;
-
 /**
  * The moment the user may have to sign in again: when the access token
  * expires.
@@ -197,14 +197,7 @@ export function ssoSessionSeverity(
   state: SsoSessionState | undefined,
   now = new Date(),
 ): SsoSessionSeverity | undefined {
-  if (!state) {
-    return undefined;
-  }
-  const remainingMs = signInDeadline(state).getTime() - now.getTime();
-  if (remainingMs <= 0) {
-    return "expired";
-  }
-  return remainingMs < SSO_EXPIRY_WARNING_MS ? "expiring" : "ok";
+  return state ? ssoSeverityFor(signInDeadline(state), now) : undefined;
 }
 
 export function describeSsoSession(
@@ -220,13 +213,5 @@ export function describeSsoSession(
   // deadline that does matter is when the refresh registration lapses, which
   // is months away and is reflected by canRenewSilently turning false.
   // Kept short: this sits in a narrow sidebar, not a settings page.
-  const remainingMs = signInDeadline(state).getTime() - now.getTime();
-  if (remainingMs <= 0) {
-    // A refresh token may still rescue this, but saying so would be a guess.
-    // If it renews, the next read clears the message.
-    return state.canRenewSilently ? "Renewing or expired" : "Sign-in expired";
-  }
-  const hours = Math.floor(remainingMs / 3_600_000);
-  const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
-  return hours > 0 ? `Signed in, ${hours}h left` : `Expires in ${minutes}m`;
+  return describeSsoExpiry(signInDeadline(state), state.canRenewSilently, now);
 }

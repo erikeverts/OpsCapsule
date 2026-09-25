@@ -1,4 +1,44 @@
-import type { CredentialStatus } from "../../../shared/credentials";
+import { useEffect, useState } from "react";
+import {
+  describeSsoExpiry,
+  ssoSeverityFor,
+  type CredentialStatus,
+} from "../../../shared/credentials";
+
+/**
+ * A countdown has to count. Status is read from the main process only on
+ * selection changes and after actions, so the remaining time is recomputed
+ * here from the deadline instead of going back over IPC to move a number.
+ */
+function useTick(active: boolean): number {
+  const [tick, setTick] = useState(() => Date.now());
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    const timer = setInterval(() => setTick(Date.now()), 30_000);
+    return () => clearInterval(timer);
+  }, [active]);
+  return tick;
+}
+
+function live(
+  credential: CredentialStatus,
+  now: Date,
+): { detail?: string; severity?: CredentialStatus["severity"] } {
+  if (!credential.expiresAt) {
+    return { detail: credential.detail, severity: credential.severity };
+  }
+  const expiresAt = new Date(credential.expiresAt);
+  return {
+    detail: describeSsoExpiry(
+      expiresAt,
+      credential.canRenewSilently ?? false,
+      now,
+    ),
+    severity: ssoSeverityFor(expiresAt, now),
+  };
+}
 
 /**
  * The sidebar offers an action only when there is something to do. A healthy
@@ -6,11 +46,14 @@ import type { CredentialStatus } from "../../../shared/credentials";
  * people to ignore it. Replacing a working credential stays in Workspace
  * Studio, where it is a deliberate act rather than a glance.
  */
-function needsAction(credential: CredentialStatus): boolean {
+function needsAction(
+  credential: CredentialStatus,
+  severity: CredentialStatus["severity"],
+): boolean {
   return (
-    !credential.authenticated ||
-    credential.severity === "expiring" ||
-    credential.severity === "expired"
+    (!credential.authenticated && !credential.expiresAt) ||
+    severity === "expiring" ||
+    severity === "expired"
   );
 }
 
@@ -37,6 +80,12 @@ export function CredentialSidebar({
   disabled,
   onAction,
 }: CredentialSidebarProps) {
+  // Only tick while something is actually counting down.
+  const counting = [...user, ...workspace, ...target].some(
+    (credential) => credential.expiresAt !== undefined,
+  );
+  const now = new Date(useTick(counting));
+
   const groups = [
     { label: "Your identities", entries: user, hint: "Shared by every workspace" },
     { label: "Workspace identities", entries: workspace, hint: undefined },
@@ -56,30 +105,31 @@ export function CredentialSidebar({
             <p className="credential-group-hint">{group.hint}</p>
           ) : null}
           <ul className="credential-list">
-            {group.entries.map((credential) => (
+            {group.entries.map((credential) => {
+              const { detail, severity } = live(credential, now);
+              return (
               <li key={`${credential.scope}:${credential.id}`}>
                 <div className="credential-row">
                   <span
                     aria-hidden="true"
                     className={`readiness-dot ${
-                      credential.severity === "expired" || !credential.authenticated
+                      severity === "expired" ||
+                      (!credential.authenticated && !credential.expiresAt)
                         ? "fail"
-                        : credential.severity === "expiring"
+                        : severity === "expiring"
                           ? "warning"
                           : "pass"
                     }`}
                   />
                   <div className="credential-row-text">
                     <strong>{credential.name}</strong>
-                    {credential.detail ? (
-                      <span
-                        className={`credential-expiry ${credential.severity ?? ""}`}
-                      >
-                        {credential.detail}
+                    {detail ? (
+                      <span className={`credential-expiry ${severity ?? ""}`}>
+                        {detail}
                       </span>
                     ) : null}
                   </div>
-                  {needsAction(credential) ? (
+                  {needsAction(credential, severity) ? (
                     <button
                       className="text-button"
                       disabled={disabled || busyId === credential.id}
@@ -95,7 +145,8 @@ export function CredentialSidebar({
                   ) : null}
                 </div>
               </li>
-            ))}
+              );
+            })}
           </ul>
         </div>
       ))}

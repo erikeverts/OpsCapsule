@@ -6,6 +6,10 @@ import {
   readSsoSessionState,
   ssoSessionSeverity,
 } from "../src/main/credentials/sso-session.js";
+import {
+  describeSsoExpiry,
+  ssoSeverityFor,
+} from "../src/shared/credentials.js";
 
 const temporary: string[] = [];
 
@@ -239,5 +243,34 @@ describe("SSO session expiry", () => {
       tokens: [],
     });
     expect(await readSsoSessionState("static", paths)).toBeUndefined();
+  });
+});
+
+describe("shared countdown formatting", () => {
+  it("produces the same text in the renderer as the main process", () => {
+    // The sidebar recomputes the countdown locally between reads, so the two
+    // must not drift apart in wording or thresholds.
+    const expiresAt = new Date(Date.now() + 90 * 60_000);
+    const state = { expiresAt, canRenewSilently: false };
+    expect(describeSsoSession(state)).toBe(
+      describeSsoExpiry(expiresAt, false),
+    );
+    expect(ssoSessionSeverity(state)).toBe(ssoSeverityFor(expiresAt));
+  });
+
+  it("moves the countdown forward as time passes", () => {
+    const expiresAt = new Date(Date.now() + 60 * 60_000);
+    const later = new Date(Date.now() + 30 * 60_000);
+    expect(describeSsoExpiry(expiresAt, false)).toBe("Signed in, 1h left");
+    expect(describeSsoExpiry(expiresAt, false, later)).toBe("Expires in 30m");
+    expect(ssoSeverityFor(expiresAt, later)).toBe("ok");
+  });
+
+  it("crosses into amber and then red without a re-read", () => {
+    const expiresAt = new Date(Date.now() + 60 * 60_000);
+    const nearlyDue = new Date(expiresAt.getTime() - 10 * 60_000);
+    const overdue = new Date(expiresAt.getTime() + 60_000);
+    expect(ssoSeverityFor(expiresAt, nearlyDue)).toBe("expiring");
+    expect(ssoSeverityFor(expiresAt, overdue)).toBe("expired");
   });
 });

@@ -230,25 +230,32 @@ export function App() {
     };
   }, [selectedTarget, selectedWorkspace]);
 
-  // Credential status is a file read, so refreshing on selection change is
-  // cheap. It is never polled: an expiry time does not need watching.
+  // Credential status is a file read, so refreshing is cheap. It is read on
+  // selection change and whenever the window regains focus, which is when a
+  // sign-in done on the host becomes relevant. The countdown itself ticks in
+  // the sidebar rather than being re-read to move a number.
   useEffect(() => {
     let cancelled = false;
-    window.opsCapsule
-      .credentialOverview({
-        ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
-        ...(selectedTargetId ? { targetId: selectedTargetId } : {}),
-      })
-      .then((overview) => {
-        if (!cancelled) {
-          setCredentials(overview);
-        }
-      })
-      .catch(() => {
-        // The sidebar is informational; a failure here must not block work.
-      });
+    const refresh = () => {
+      window.opsCapsule
+        .credentialOverview({
+          ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
+          ...(selectedTargetId ? { targetId: selectedTargetId } : {}),
+        })
+        .then((overview) => {
+          if (!cancelled) {
+            setCredentials(overview);
+          }
+        })
+        .catch(() => {
+          // The sidebar is informational; a failure must not block work.
+        });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
     return () => {
       cancelled = true;
+      window.removeEventListener("focus", refresh);
     };
   }, [selectedWorkspaceId, selectedTargetId, editor]);
 
