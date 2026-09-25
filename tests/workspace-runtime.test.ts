@@ -466,6 +466,12 @@ describe("brokered credentials in the launch path", () => {
 
     expect(runtime.brokerSocket).toBeDefined();
     expect(runtime.brokerHelper).toBeDefined();
+
+    // A unix socket path is capped at 104 bytes on macOS. Placing it under the
+    // session root exceeded that for the real Application Support path and
+    // failed at listen() with EINVAL, so it must live in the short temp path.
+    expect(runtime.brokerSocket!.startsWith(runtime.temp)).toBe(true);
+    expect(Buffer.byteLength(runtime.brokerSocket!) + 1).toBeLessThanOrEqual(104);
     expect(resolved.credentials.operational?.id).toBe("target-operational");
     expect(resolved.credentials.inference?.id).toBe("central-inference");
 

@@ -366,7 +366,11 @@ export async function createWorkspaceRuntime(
   const needsBrokerChannel = delivery.requiresBrokerChannel(
     assignments.map(({ reference }) => reference),
   );
-  const brokerSocket = needsBrokerChannel ? join(root, "broker.sock") : undefined;
+  // The socket lives in the session temp directory, not under the session
+  // root. A unix socket path is limited to 104 bytes on macOS, and
+  // "<userData>/sessions/<uuid>/broker.sock" already exceeds that under the
+  // real Application Support path, which fails at listen() with EINVAL.
+  const brokerSocket = needsBrokerChannel ? join(temp, "broker.sock") : undefined;
   const brokerHelper = needsBrokerChannel ? join(root, "broker") : undefined;
 
   await Promise.all([

@@ -72,6 +72,7 @@ export class CredentialBrokerSession {
     if (this.server) {
       throw new Error("The broker session is already listening.");
     }
+    assertUsableSocketPath(this.options.socketPath);
     await rm(this.options.socketPath, { force: true });
     const server = createServer((socket) => {
       void this.handleConnection(socket);
@@ -181,6 +182,21 @@ export class CredentialBrokerSession {
       await new Promise<void>((resolve) => server.close(() => resolve()));
     }
     await rm(this.options.socketPath, { force: true });
+  }
+}
+
+/**
+ * A unix socket address is a fixed-size field: 104 bytes on macOS and 108 on
+ * Linux. Exceeding it fails at listen() with a bare EINVAL that says nothing
+ * about the cause, so it is checked up front.
+ */
+export function assertUsableSocketPath(socketPath: string): void {
+  const limit = process.platform === "darwin" ? 104 : 108;
+  const length = Buffer.byteLength(socketPath) + 1;
+  if (length > limit) {
+    throw new Error(
+      `The broker socket path is ${length} bytes, over the ${limit}-byte limit on this platform: ${socketPath}`,
+    );
   }
 }
 

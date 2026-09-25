@@ -5,6 +5,7 @@ import { connect } from "node:net";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
+  assertUsableSocketPath,
   CredentialBrokerSession,
   type BrokerAuditEvent,
 } from "../src/main/credentials/broker.js";
@@ -369,6 +370,16 @@ describe("broker session protocol", () => {
     );
     expect(response).not.toContain("ASIAFROMMAINPROCESS");
     await session.close();
+  });
+
+  it("rejects a socket path longer than the platform allows", async () => {
+    // The real userData path, which is what actually failed with EINVAL.
+    const realistic =
+      "/Users/example/Library/Application Support/OpsCapsule/sessions/9edb24db-51a0-4989-9528-108cfb2d7813/broker.sock";
+    expect(() => assertUsableSocketPath(realistic)).toThrow(/over the 10\d-byte limit/);
+    expect(() =>
+      assertUsableSocketPath("/private/tmp/opscapsule-9edb24db-AbCdEf/broker.sock"),
+    ).not.toThrow();
   });
 
   it("removes its socket on close", async () => {

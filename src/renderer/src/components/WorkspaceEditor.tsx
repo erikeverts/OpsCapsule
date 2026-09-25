@@ -704,7 +704,7 @@ export function WorkspaceEditor({
             onClick={cancel}
             type="button"
           >
-            Cancel
+            {dirty ? "Cancel" : "Close"}
           </button>
           <button
             className="primary-button"
