@@ -49,10 +49,13 @@ call.
 
 1. Workspace Studio → **Credentials** → **Add credential**.
 2. Set kind to **AWS session** and pick the **AWS profile** from the list.
-3. The status line shows whether that profile currently resolves credentials.
+3. **Save changes.** Authentication acts on the saved manifest, so a credential
+   that exists only in the draft shows *Not saved* and its button stays
+   disabled. Saving closes the studio; reopen it to continue.
+4. The status line shows whether that profile currently resolves credentials.
    If its SSO session has expired, choose **Sign in**; the browser flow runs in
    the main process, never inside a capsule.
-4. Select it as a target's **operational credential**.
+5. Select it as a target's **operational credential**.
 
 There is no file to choose and no secret to paste. If you expected a file
 picker here, that was an earlier design and it was wrong.

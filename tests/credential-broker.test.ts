@@ -730,9 +730,11 @@ describe("credential service", () => {
     expect(JSON.stringify(statuses)).not.toContain("super-secret");
   });
 
-  it("rejects a credential the workspace does not declare", () => {
+  it("tells the user to save when a credential is only in an unsaved draft", () => {
+    // The saved manifest is the authority, so the renderer cannot make main
+    // act on a reference it invented. The message has to say so usefully.
     expect(() => requireReference(manifest, "not-declared")).toThrow(
-      /does not declare credential/,
+      /is not saved in workspace 'atlas'. Save the workspace and try again./,
     );
   });
 

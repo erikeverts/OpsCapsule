@@ -586,6 +586,12 @@ export function WorkspaceEditor({
       setGeneratedKubernetesContextIds(new Set());
       setGeneratedTargetIds(new Set());
       setGeneratedAgentProfileIds(new Set());
+      void window.opsCapsule
+        .credentialStatus(saved.manifest.metadata.id)
+        .then(setCredentialStatuses)
+        .catch(() => {
+          // Status is refreshed again when the section is next opened.
+        });
       await onSaved(saved.manifest.metadata.id);
     } catch (reason) {
       setError(describeValidationError(reason));
@@ -1900,6 +1906,18 @@ export function WorkspaceEditor({
                     (entry) => entry.id === credential.id,
                   );
                   const busy = credentialBusy === credential.id;
+                  // Authentication acts on the saved manifest, which is the
+                  // authority for which credentials exist. A credential that is
+                  // only in the draft cannot be acted on yet.
+                  const saved = document?.manifest.credentials.find(
+                    (entry) => entry.id === credential.id,
+                  );
+                  const unsaved =
+                    mode === "create" ||
+                    !saved ||
+                    saved.kind !== credential.kind ||
+                    saved.sourceProfile !== credential.sourceProfile ||
+                    saved.scope !== credential.scope;
                   return (
                     <article className="studio-card" key={credential.id}>
                       <div className="resource-card-header">
@@ -2043,12 +2061,16 @@ export function WorkspaceEditor({
                       <div className="resource-card-header">
                         <div>
                           <strong>
-                            {status?.authenticated
-                              ? "Authenticated"
-                              : "Not authenticated"}
+                            {unsaved
+                              ? "Not saved"
+                              : status?.authenticated
+                                ? "Authenticated"
+                                : "Not authenticated"}
                           </strong>
                           <div className="field-hint">
-                            {credential.kind === "aws-profile"
+                            {unsaved
+                              ? "Save the workspace to authenticate this credential."
+                              : credential.kind === "aws-profile"
                               ? status?.authenticated
                                 ? `Profile '${credential.sourceProfile}' currently resolves credentials.`
                                 : credential.sourceProfile
@@ -2064,7 +2086,7 @@ export function WorkspaceEditor({
                             className="secondary-button"
                             disabled={
                               busy ||
-                              mode === "create" ||
+                              unsaved ||
                               (credential.kind === "aws-profile" &&
                                 !credential.sourceProfile)
                             }

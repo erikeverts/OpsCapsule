@@ -74,8 +74,11 @@ export function requireReference(
 ): CredentialReference {
   const reference = manifest.credentials.find(({ id }) => id === referenceId);
   if (!reference) {
+    // Most often this means the credential exists only in an unsaved draft.
+    // Authentication deliberately acts on the saved manifest, so that the
+    // renderer cannot make the main process act on a reference it invented.
     throw new Error(
-      `Workspace '${manifest.metadata.id}' does not declare credential '${referenceId}'.`,
+      `Credential '${referenceId}' is not saved in workspace '${manifest.metadata.id}'. Save the workspace and try again.`,
     );
   }
   return reference;
