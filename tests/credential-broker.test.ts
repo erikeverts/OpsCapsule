@@ -17,7 +17,10 @@ import {
   buildCapsuleAwsConfig,
   INFERENCE_PROFILE_NAME,
 } from "../src/main/credentials/delivery/aws.js";
-import { ProviderOAuthDelivery } from "../src/main/credentials/delivery/provider-oauth.js";
+import {
+  ProviderOAuthDelivery,
+  withoutRefreshTokens,
+} from "../src/main/credentials/delivery/provider-oauth.js";
 import { CredentialDeliveryRegistry } from "../src/main/credentials/delivery/registry.js";
 import {
   CredentialNotStoredError,
@@ -32,6 +35,12 @@ import {
   resetSandboxRuntime,
   wrapSandboxedLaunch,
 } from "../src/main/isolation/sandbox-command.js";
+import {
+  assertUsableSecret,
+  credentialStatuses,
+  requireReference,
+  storageContextFor,
+} from "../src/main/credentials/service.js";
 import type { CredentialReference } from "../src/shared/credentials.js";
 
 const executeFile = promisify(execFile);
@@ -606,12 +615,37 @@ describe("provider-agnostic delivery", () => {
 
     await new ProviderOAuthDelivery().prepare(context);
     const destination = join(agentState, "data", "opencode", "auth.json");
-    expect(await readFile(destination, "utf8")).toBe(secret);
+    expect(JSON.parse(await readFile(destination, "utf8"))).toEqual({
+      github: { type: "oauth", access: "tok" },
+    });
     expect((await stat(destination)).mode & 0o777).toBe(0o600);
 
     // The secret must not outlive the capsule.
     await new ProviderOAuthDelivery().teardown(context);
     await expect(stat(destination)).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("never lets a refresh token into the capsule", () => {
+    const stored = JSON.stringify({
+      "github-copilot": {
+        type: "oauth",
+        access: "short-lived",
+        refresh: "long-lived-must-not-leak",
+        expires: 1,
+      },
+    });
+    const materialized = withoutRefreshTokens(stored);
+
+    expect(materialized).toContain("short-lived");
+    // A refresh token would let a capsule mint new access tokens indefinitely,
+    // outliving the session and defeating revocation.
+    expect(materialized).not.toContain("long-lived-must-not-leak");
+    expect(JSON.parse(materialized)["github-copilot"].refresh).toBeUndefined();
+    expect(JSON.parse(materialized)["github-copilot"].expires).toBe(1);
+  });
+
+  it("passes through a non-JSON credential rather than corrupting it", () => {
+    expect(withoutRefreshTokens("ghp_opaque_token")).toBe("ghp_opaque_token");
   });
 
   it("refuses to serve a materialized credential over the broker channel", () => {
@@ -637,5 +671,78 @@ describe("provider-agnostic delivery", () => {
         readSecret: async () => "{}",
       }),
     ).rejects.toThrow(/No credential delivery is implemented/);
+  });
+});
+
+describe("credential service", () => {
+  const manifest = {
+    metadata: { id: "atlas", name: "Atlas" },
+    credentials: [
+      { id: "central-inference", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+      { id: "target-operational", name: "Production", kind: "aws-profile", scope: "target", region: "eu-west-1" },
+    ],
+    inferenceCredential: "central-inference",
+    targets: [
+      { id: "production", operationalCredential: "target-operational" },
+      { id: "staging" },
+    ],
+  } as unknown as Parameters<typeof credentialStatuses>[1];
+
+  it("resolves a target-scoped reference to the target that selects it", () => {
+    expect(
+      storageContextFor(manifest, manifest.credentials[1]!),
+    ).toEqual({ workspaceId: "atlas", targetId: "production" });
+    // An explicit target always wins.
+    expect(
+      storageContextFor(manifest, manifest.credentials[1]!, "staging").targetId,
+    ).toBe("staging");
+  });
+
+  it("reports authentication status without exposing any secret", async () => {
+    const base = await temporaryRoot("oc-service-");
+    const store = new CredentialStore(base, fakeEncryptor());
+    await store.write(manifest.credentials[0]!, "super-secret", {});
+
+    const statuses = await credentialStatuses(store, manifest);
+    expect(statuses).toEqual([
+      {
+        id: "central-inference",
+        name: "Copilot",
+        kind: "provider-oauth",
+        scope: "user",
+        authenticated: true,
+      },
+      {
+        id: "target-operational",
+        name: "Production",
+        kind: "aws-profile",
+        scope: "target",
+        authenticated: false,
+      },
+    ]);
+    // The renderer contract must never carry credential material.
+    expect(JSON.stringify(statuses)).not.toContain("super-secret");
+  });
+
+  it("rejects a credential the workspace does not declare", () => {
+    expect(() => requireReference(manifest, "not-declared")).toThrow(
+      /does not declare credential/,
+    );
+  });
+
+  it("validates a secret at import time rather than inside a capsule", () => {
+    const aws = manifest.credentials[1]!;
+    expect(() => assertUsableSecret(aws, "")).toThrow(/empty/);
+    expect(() => assertUsableSecret(aws, "not json")).toThrow(/valid JSON/);
+    expect(() =>
+      assertUsableSecret(aws, JSON.stringify({ accessKeyId: "a" })),
+    ).toThrow(/secretAccessKey/);
+    expect(() =>
+      assertUsableSecret(aws, JSON.stringify(issued)),
+    ).not.toThrow();
+
+    const oauth = manifest.credentials[0]!;
+    expect(() => assertUsableSecret(oauth, "not json")).toThrow(/valid JSON/);
+    expect(() => assertUsableSecret(oauth, "{}")).not.toThrow();
   });
 });

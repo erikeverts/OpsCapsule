@@ -46,6 +46,36 @@ function destinationFor(
   return resolve(agentState);
 }
 
+/**
+ * A refresh token is long-lived and must never enter a capsule: it would let
+ * whatever runs there mint new access tokens indefinitely, outliving the
+ * session and defeating revocation. The main process keeps it and the capsule
+ * receives only the short-lived access token.
+ */
+export function withoutRefreshTokens(secret: string): string {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(secret);
+  } catch {
+    // Not JSON: it cannot be selectively stripped, so it is passed through
+    // unchanged rather than silently corrupted.
+    return secret;
+  }
+  if (!parsed || typeof parsed !== "object") {
+    return secret;
+  }
+  const stripped = Object.fromEntries(
+    Object.entries(parsed as Record<string, unknown>).map(([key, value]) => {
+      if (!value || typeof value !== "object") {
+        return [key, value];
+      }
+      const { refresh: _refresh, ...rest } = value as Record<string, unknown>;
+      return [key, rest];
+    }),
+  );
+  return `${JSON.stringify(stripped, null, 2)}\n`;
+}
+
 export class ProviderOAuthDelivery implements CredentialDeliveryAdapter {
   readonly id = "provider-oauth";
   readonly transport = "materialize" as const;
@@ -55,7 +85,10 @@ export class ProviderOAuthDelivery implements CredentialDeliveryAdapter {
       const destination = destinationFor(reference, context.agentState);
       const secret = await context.readSecret(reference);
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-      await writeFile(destination, secret, { encoding: "utf8", mode: 0o600 });
+      await writeFile(destination, withoutRefreshTokens(secret), {
+        encoding: "utf8",
+        mode: 0o600,
+      });
     }
   }
 

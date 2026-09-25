@@ -7,6 +7,7 @@ import type {
   LocalResourceOptions,
   WorkspaceDocument,
 } from "../../../shared/contracts";
+import type { CredentialStatus } from "../../../shared/credentials";
 import {
   identifierFromName,
   uniqueIdentifier,
@@ -32,6 +33,7 @@ type EditorSection =
   | "cloud"
   | "kubernetes"
   | "agents"
+  | "credentials"
   | "targets";
 
 interface WorkspaceEditorProps {
@@ -58,6 +60,11 @@ const editorSections: Array<{
   { id: "cloud", label: "Cloud", description: "Accounts and identities" },
   { id: "kubernetes", label: "Kubernetes", description: "Cluster contexts" },
   { id: "agents", label: "Agents", description: "Profiles and configuration" },
+  {
+    id: "credentials",
+    label: "Credentials",
+    description: "Identities and authentication",
+  },
   { id: "targets", label: "Targets", description: "Operational environments" },
 ];
 
@@ -295,6 +302,11 @@ export function WorkspaceEditor({
   const [agentConfigurationWarnings, setAgentConfigurationWarnings] = useState<
     Record<string, AgentConfigurationWarning[]>
   >({});
+  const [credentialStatuses, setCredentialStatuses] = useState<
+    CredentialStatus[]
+  >([]);
+  const [credentialBusy, setCredentialBusy] = useState<string | null>(null);
+  const [credentialError, setCredentialError] = useState<string | null>(null);
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
     () => (mode === "create" ? new Set(["workspace"]) : new Set()),
   );
@@ -309,6 +321,28 @@ export function WorkspaceEditor({
   const [generatedAgentProfileIds, setGeneratedAgentProfileIds] = useState<
     Set<string>
   >(() => (mode === "create" ? new Set(["agent"]) : new Set()));
+
+  useEffect(() => {
+    if (mode !== "edit" || !workspaceId) {
+      return;
+    }
+    let cancelledStatuses = false;
+    window.opsCapsule
+      .credentialStatus(workspaceId)
+      .then((statuses) => {
+        if (!cancelledStatuses) {
+          setCredentialStatuses(statuses);
+        }
+      })
+      .catch((statusError: Error) => {
+        if (!cancelledStatuses) {
+          setCredentialError(statusError.message);
+        }
+      });
+    return () => {
+      cancelledStatuses = true;
+    };
+  }, [mode, workspaceId]);
 
   useEffect(() => {
     if (mode !== "edit" || !workspaceId) {
@@ -588,6 +622,35 @@ export function WorkspaceEditor({
     } finally {
       setDeleting(false);
     }
+  }
+
+  async function runCredentialAction(
+    referenceId: string,
+    action: () => Promise<CredentialStatus[]>,
+  ): Promise<void> {
+    setCredentialBusy(referenceId);
+    setCredentialError(null);
+    try {
+      setCredentialStatuses(await action());
+    } catch (actionError) {
+      setCredentialError((actionError as Error).message);
+    } finally {
+      setCredentialBusy(null);
+    }
+  }
+
+  async function importCredential(referenceId: string): Promise<void> {
+    const sourcePath = await window.opsCapsule.choosePath("file");
+    if (!sourcePath) {
+      return;
+    }
+    await runCredentialAction(referenceId, () =>
+      window.opsCapsule.importCredential({
+        workspaceId: workspaceId!,
+        referenceId,
+        sourcePath,
+      }),
+    );
   }
 
   async function browsePath(
@@ -1805,6 +1868,247 @@ export function WorkspaceEditor({
             </>
           ) : null}
 
+          {section === "credentials" ? (
+            <>
+              <EditorSectionHeader
+                title="Credentials"
+                description="References are stored in the manifest; secrets are held by the operating system and never written here."
+              />
+              {credentialError ? (
+                <div className="error-banner">{credentialError}</div>
+              ) : null}
+              {mode === "create" ? (
+                <div className="studio-card">
+                  <p className="field-hint">
+                    Save the workspace before authenticating, so credentials can
+                    be bound to it.
+                  </p>
+                </div>
+              ) : null}
+              <div className="studio-stack">
+                {draft.credentials.length === 0 ? (
+                  <div className="studio-card">
+                    <p className="field-hint">
+                      No credentials are declared. Add one to give this
+                      workspace a brokered identity, then select it on a target
+                      or as the inference identity below.
+                    </p>
+                  </div>
+                ) : null}
+                {draft.credentials.map((credential, index) => {
+                  const status = credentialStatuses.find(
+                    (entry) => entry.id === credential.id,
+                  );
+                  const busy = credentialBusy === credential.id;
+                  return (
+                    <article className="studio-card" key={credential.id}>
+                      <div className="resource-card-header">
+                        <div>
+                          <strong>{credential.name}</strong>
+                          <div className="field-hint">
+                            <code>{credential.id}</code> · {credential.kind} ·{" "}
+                            {credential.scope} scope
+                          </div>
+                        </div>
+                        <button
+                          className="text-button danger"
+                          onClick={() =>
+                            updateDraft((next) => {
+                              next.credentials.splice(index, 1);
+                              if (next.inferenceCredential === credential.id) {
+                                delete next.inferenceCredential;
+                              }
+                              for (const target of next.targets) {
+                                if (
+                                  target.operationalCredential === credential.id
+                                ) {
+                                  delete target.operationalCredential;
+                                }
+                              }
+                            })
+                          }
+                          type="button"
+                        >
+                          Remove
+                        </button>
+                      </div>
+
+                      <Field label="Name">
+                        <input
+                          value={credential.name}
+                          onChange={(event) =>
+                            updateDraft((next) => {
+                              next.credentials[index]!.name =
+                                event.target.value;
+                            })
+                          }
+                        />
+                      </Field>
+
+                      <Field label="Kind">
+                        <select
+                          value={credential.kind}
+                          onChange={(event) =>
+                            updateDraft((next) => {
+                              next.credentials[index]!.kind = event.target
+                                .value as typeof credential.kind;
+                            })
+                          }
+                        >
+                          <option value="aws-profile">AWS session</option>
+                          <option value="aws-role">AWS role</option>
+                          <option value="provider-oauth">Provider login</option>
+                        </select>
+                      </Field>
+
+                      <Field label="Scope">
+                        <select
+                          value={credential.scope}
+                          onChange={(event) =>
+                            updateDraft((next) => {
+                              next.credentials[index]!.scope = event.target
+                                .value as typeof credential.scope;
+                            })
+                          }
+                        >
+                          <option value="user">
+                            User · shared by every workspace
+                          </option>
+                          <option value="workspace">
+                            Workspace · shared by its targets
+                          </option>
+                          <option value="target">
+                            Target · never shared between environments
+                          </option>
+                        </select>
+                      </Field>
+
+                      {credential.kind === "provider-oauth" ? (
+                        <Field label="Provider">
+                          <input
+                            placeholder="opencode"
+                            value={credential.providerId ?? ""}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.credentials[index]!.providerId =
+                                  event.target.value || undefined;
+                              })
+                            }
+                          />
+                        </Field>
+                      ) : (
+                        <Field label="Region">
+                          <input
+                            placeholder="eu-west-1"
+                            value={credential.region ?? ""}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.credentials[index]!.region =
+                                  event.target.value || undefined;
+                              })
+                            }
+                          />
+                        </Field>
+                      )}
+
+                      <div className="resource-card-header">
+                        <div>
+                          <strong>
+                            {status?.authenticated
+                              ? "Authenticated"
+                              : "Not authenticated"}
+                          </strong>
+                          <div className="field-hint">
+                            {status?.authenticated
+                              ? "A secret is held in the operating system keychain."
+                              : "No secret is stored for this reference yet."}
+                          </div>
+                        </div>
+                        <div className="header-actions">
+                          <button
+                            className="secondary-button"
+                            disabled={busy || mode === "create"}
+                            onClick={() => importCredential(credential.id)}
+                            type="button"
+                          >
+                            {status?.authenticated
+                              ? "Replace secret"
+                              : "Authenticate"}
+                          </button>
+                          {status?.authenticated ? (
+                            <button
+                              className="text-button danger"
+                              disabled={busy}
+                              onClick={() =>
+                                runCredentialAction(credential.id, () =>
+                                  window.opsCapsule.forgetCredential({
+                                    workspaceId: workspaceId!,
+                                    referenceId: credential.id,
+                                  }),
+                                )
+                              }
+                              type="button"
+                            >
+                              Sign out
+                            </button>
+                          ) : null}
+                        </div>
+                      </div>
+                    </article>
+                  );
+                })}
+
+                <button
+                  className="secondary-button"
+                  onClick={() =>
+                    updateDraft((next) => {
+                      const id = uniqueIdentifier(
+                        "credential",
+                        next.credentials.map((entry) => entry.id),
+                      );
+                      next.credentials.push({
+                        id,
+                        name: "New credential",
+                        kind: "aws-profile",
+                        scope: "user",
+                      });
+                    })
+                  }
+                  type="button"
+                >
+                  Add credential
+                </button>
+              </div>
+
+              <EditorSectionHeader
+                title="Inference identity"
+                description="Used only by the model provider. Keeping it separate from the target identity stops inference being billed to a customer account."
+              />
+              <div className="studio-card studio-fields">
+                <Field label="Inference credential">
+                  <select
+                    value={draft.inferenceCredential ?? ""}
+                    onChange={(event) =>
+                      updateDraft((next) => {
+                        next.inferenceCredential =
+                          event.target.value || undefined;
+                      })
+                    }
+                  >
+                    <option value="">
+                      None · agents use the target identity
+                    </option>
+                    {draft.credentials.map((credential) => (
+                      <option key={credential.id} value={credential.id}>
+                        {credential.name}
+                      </option>
+                    ))}
+                  </select>
+                </Field>
+              </div>
+            </>
+          ) : null}
+
           {section === "targets" ? (
             <>
               <EditorSectionHeader
@@ -1950,6 +2254,37 @@ export function WorkspaceEditor({
                               {connection.name}
                             </option>
                           ))}
+                        </select>
+                      </Field>
+                      <Field label="Operational credential">
+                        <select
+                          value={target.operationalCredential ?? ""}
+                          onChange={(event) =>
+                            updateDraft((next) => {
+                              const value = event.target.value;
+                              if (value) {
+                                next.targets[index]!.operationalCredential =
+                                  value;
+                              } else {
+                                delete next.targets[index]!
+                                  .operationalCredential;
+                              }
+                            })
+                          }
+                        >
+                          <option value="">
+                            None · use the cloud connection profile
+                          </option>
+                          {draft.credentials
+                            .filter(
+                              (credential) =>
+                                credential.id !== draft.inferenceCredential,
+                            )
+                            .map((credential) => (
+                              <option key={credential.id} value={credential.id}>
+                                {credential.name}
+                              </option>
+                            ))}
                         </select>
                       </Field>
                       <Field label="Kubernetes context">

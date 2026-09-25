@@ -6,10 +6,13 @@ delivered to a capsule at launch or at point of use. The design and its
 trade-offs are recorded in
 [ADR 0007](adr/0007-credential-broker-and-inference-identity.md).
 
-There is no authentication UI yet. Until there is, the developer CLI below is
-the way to populate the store. It runs under Electron and uses the same
-`safeStorage` and the same credential store as the application, so it exercises
-the real path rather than writing a fixture.
+Credentials are managed in **Workspace Studio → Credentials**: declare a
+reference, see whether it is authenticated, supply or replace its secret, and
+sign out. A developer CLI is also available for scripting and troubleshooting.
+
+Authentication always runs in the main process. A capsule never performs a
+login and never holds a long-lived secret; it receives a brokered session or a
+short-lived token at launch.
 
 ## Concepts
 
@@ -28,7 +31,20 @@ reused by every workspace and target, which is the expected shape for a central
 Bedrock account or a personal Copilot login. A `target`-scoped reference is
 partitioned per workspace and target so environments never share one.
 
-## Storing a credential
+## Storing a credential from the UI
+
+1. Open the workspace in Workspace Studio and select **Credentials**.
+2. **Add credential**, then set its name, kind, and scope.
+3. Choose **Authenticate** and select the file holding the secret.
+4. Select the credential as the workspace **inference identity**, or as a
+   target's **operational credential**.
+
+The status line shows whether a secret is held in the OS keychain. **Sign out**
+removes the secret and keeps the reference.
+
+## Storing a credential from the CLI
+
+The CLI is equivalent to the UI and useful for scripting.
 
 ```bash
 npm run credentials -- help
@@ -102,7 +118,8 @@ Delivery depends on the credential kind, because consumers differ:
 - **materialize** - a provider login such as Copilot is written into
   scope-appropriate agent state at launch with `0600` permissions and removed
   on teardown. The secret is briefly at rest inside the capsule, but no channel
-  is opened at all.
+  is opened at all. Refresh tokens are stripped before the file is written, so
+  a capsule only ever receives the short-lived access token.
 
 A capsule therefore only receives a broker socket when something actually
 pulls. With no credentials, or with only materialized ones,
@@ -138,7 +155,9 @@ plaintext must not appear in the file.
 
 - `aws-role` references are refused rather than silently treated as long-lived
   credentials. STS role assumption is a later slice.
-- There is no login, logout, or authentication status in the UI yet.
+- Authenticate imports a secret you already obtained, for example by running
+  `opencode auth login` on the host once. Running the provider's own device
+  code or browser flow from the main process is a later slice.
 - Identity verification against `expectedAccountId` is not implemented, so the
   account shown in the UI is still a declared value rather than a verified one.
 - The broker transport depends on `nc` on macOS and `socat` on Linux. A missing

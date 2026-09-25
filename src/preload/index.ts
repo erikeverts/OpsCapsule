@@ -27,6 +27,10 @@ const api: OpsCapsuleApi = {
     ipcRenderer.invoke(IPC.inspectAgentConfiguration, { path, workspaceId }),
   discoverLocalResources: () =>
     ipcRenderer.invoke(IPC.discoverLocalResources),
+  credentialStatus: (workspaceId) =>
+    ipcRenderer.invoke(IPC.credentialStatus, { workspaceId }),
+  importCredential: (input) => ipcRenderer.invoke(IPC.credentialImport, input),
+  forgetCredential: (input) => ipcRenderer.invoke(IPC.credentialForget, input),
   checkTargetReadiness: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.checkTargetReadiness, { workspaceId, targetId }),
   startWorkspace: (workspaceId, targetId) =>

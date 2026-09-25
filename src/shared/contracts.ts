@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CredentialStatus } from "./credentials.js";
 import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
@@ -266,6 +267,26 @@ export const stopWorkspaceInput = z.object({
   sessionId: z.string().min(1),
 });
 
+export const credentialStatusInput = z.object({
+  workspaceId: z.string().min(1),
+});
+
+export const credentialImportInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+  targetId: z.string().min(1).optional(),
+  /** Absolute path of a file to import. Chosen by the user, read in main. */
+  sourcePath: z.string().min(1).optional(),
+  /** Pasted secret. Never logged and never returned to the renderer. */
+  secret: z.string().min(1).max(200_000).optional(),
+});
+
+export const credentialForgetInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+  targetId: z.string().min(1).optional(),
+});
+
 export interface OpsCapsuleApi {
   listWorkspaces(): Promise<WorkspaceCatalog>;
   getWorkspace(workspaceId: string): Promise<WorkspaceDocument>;
@@ -283,6 +304,25 @@ export interface OpsCapsuleApi {
     workspaceId?: string,
   ): Promise<AgentConfigurationInspection>;
   discoverLocalResources(): Promise<LocalResourceOptions>;
+  /** Authentication status for every credential the workspace declares. */
+  credentialStatus(workspaceId: string): Promise<CredentialStatus[]>;
+  /**
+   * Stores a secret for a declared reference. Either a file the user picked or
+   * a pasted value; the secret itself never travels back to the renderer.
+   */
+  importCredential(input: {
+    workspaceId: string;
+    referenceId: string;
+    targetId?: string;
+    sourcePath?: string;
+    secret?: string;
+  }): Promise<CredentialStatus[]>;
+  /** Sign out. Removes the stored secret, keeping the reference. */
+  forgetCredential(input: {
+    workspaceId: string;
+    referenceId: string;
+    targetId?: string;
+  }): Promise<CredentialStatus[]>;
   checkTargetReadiness(
     workspaceId: string,
     targetId: string,

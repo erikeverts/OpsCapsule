@@ -13,6 +13,9 @@ import {
 import {
   choosePathInput,
   createWorkspaceInput,
+  credentialForgetInput,
+  credentialImportInput,
+  credentialStatusInput,
   deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
@@ -30,6 +33,13 @@ import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
 import { CredentialStore, scopeContext } from "./credentials/store.js";
+import {
+  assertUsableSecret,
+  credentialStatuses,
+  readSecretFromFile,
+  requireReference,
+  storageContextFor,
+} from "./credentials/service.js";
 import type { CapsuleBroker } from "./terminal-manager.js";
 import {
   cleanupStaleWorkspaceRuntimes,
@@ -168,6 +178,56 @@ function registerIpcHandlers(): void {
     return checkTargetReadiness(
       await workspaceRegistry.resolveTarget(workspaceId, targetId),
     );
+  });
+
+  const credentialStoreFor = () =>
+    new CredentialStore(app.getPath("userData"), safeStorage);
+
+  ipcMain.handle(IPC.credentialStatus, async (_event, input: unknown) => {
+    const { workspaceId } = credentialStatusInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(workspaceId);
+    return credentialStatuses(credentialStoreFor(), manifest);
+  });
+
+  ipcMain.handle(IPC.credentialImport, async (_event, input: unknown) => {
+    const request = credentialImportInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+
+    const secret = request.sourcePath
+      ? await readSecretFromFile(request.sourcePath)
+      : request.secret;
+    if (!secret) {
+      throw new Error("No credential was supplied.");
+    }
+    assertUsableSecret(reference, secret);
+
+    const store = credentialStoreFor();
+    await store.write(
+      reference,
+      secret,
+      scopeContext(
+        reference.scope,
+        storageContextFor(manifest, reference, request.targetId),
+      ),
+    );
+    // Only status returns to the renderer; the secret never does.
+    return credentialStatuses(store, manifest);
+  });
+
+  ipcMain.handle(IPC.credentialForget, async (_event, input: unknown) => {
+    const request = credentialForgetInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+    const store = credentialStoreFor();
+    await store.forget(
+      reference,
+      scopeContext(
+        reference.scope,
+        storageContextFor(manifest, reference, request.targetId),
+      ),
+    );
+    return credentialStatuses(store, manifest);
   });
 
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
