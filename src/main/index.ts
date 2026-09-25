@@ -16,6 +16,7 @@ import {
   credentialAuthenticateInput,
   credentialForgetInput,
   credentialImportInput,
+  credentialOverviewInput,
   credentialStatusInput,
   deleteWorkspaceInput,
   inspectDirectoryInput,
@@ -38,6 +39,7 @@ import { readAgentLogin } from "./credentials/agent-logins.js";
 import { ssoLogin } from "./credentials/aws-profile.js";
 import {
   assertUsableSecret,
+  credentialOverview,
   credentialStatuses,
   readSecretFromFile,
   requireReference,
@@ -190,6 +192,15 @@ function registerIpcHandlers(): void {
     const { workspaceId } = credentialStatusInput.parse(input);
     const { manifest } = await workspaceRegistry.document(workspaceId);
     return credentialStatuses(credentialStoreFor(), manifest);
+  });
+
+  ipcMain.handle(IPC.credentialOverview, async (_event, input: unknown) => {
+    const selected = credentialOverviewInput.parse(input);
+    const { workspaces } = await workspaceRegistry.catalog();
+    const manifests = await Promise.all(
+      workspaces.map(async ({ id }) => (await workspaceRegistry.document(id)).manifest),
+    );
+    return credentialOverview(credentialStoreFor(), manifests, selected);
   });
 
   ipcMain.handle(IPC.credentialImport, async (_event, input: unknown) => {

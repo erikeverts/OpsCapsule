@@ -4,7 +4,12 @@ import type {
   CredentialStatus,
 } from "../../shared/credentials.js";
 import type { WorkspaceManifest } from "../../shared/workspace-schema.js";
-import { profileResolves } from "./aws-profile.js";
+import { discoverAwsProfiles } from "../local-resources.js";
+import {
+  describeSsoSession,
+  readSsoSessionState,
+  ssoSessionSeverity,
+} from "./sso-session.js";
 import { CredentialStore, scopeContext } from "./store.js";
 
 /**
@@ -31,41 +36,152 @@ export async function credentialStatuses(
   store: CredentialStore,
   manifest: WorkspaceManifest,
 ): Promise<CredentialStatus[]> {
+  // Profile names are read once rather than per credential.
+  const knownProfiles = new Set(
+    (await discoverAwsProfiles().catch(() => [])).map(({ name }) => name),
+  );
   return Promise.all(
-    manifest.credentials.map(async (reference) => ({
-      id: reference.id,
-      name: reference.name,
-      kind: reference.kind,
-      scope: reference.scope,
-      ...(reference.expectedAccountId
-        ? { expectedAccountId: reference.expectedAccountId }
-        : {}),
-      ...(reference.sourceProfile
-        ? { sourceProfile: reference.sourceProfile }
-        : {}),
-      authenticated: await isAuthenticated(store, manifest, reference),
-    })),
+    manifest.credentials.map((reference) =>
+      credentialStatus(store, manifest, reference, knownProfiles),
+    ),
   );
 }
 
-/**
- * An AWS profile holds no stored secret, so its status is whether the host
- * profile can currently produce credentials. Anything else is a stored secret.
- */
-async function isAuthenticated(
+export async function credentialStatus(
   store: CredentialStore,
   manifest: WorkspaceManifest,
   reference: CredentialReference,
-): Promise<boolean> {
+  knownProfiles?: Set<string>,
+): Promise<CredentialStatus> {
+  const base = {
+    id: reference.id,
+    name: reference.name,
+    kind: reference.kind,
+    scope: reference.scope,
+    workspaceId: manifest.metadata.id,
+    ...(reference.expectedAccountId
+      ? { expectedAccountId: reference.expectedAccountId }
+      : {}),
+    ...(reference.sourceProfile
+      ? { sourceProfile: reference.sourceProfile }
+      : {}),
+  };
+
   if (reference.kind === "aws-profile") {
-    return reference.sourceProfile
-      ? profileResolves(reference.sourceProfile)
-      : false;
+    const profile = reference.sourceProfile;
+    if (!profile) {
+      return { ...base, authenticated: false, detail: "No profile selected" };
+    }
+    // Status is a file read. Resolving the profile is authoritative but costs
+    // a subprocess, which is too expensive to show repeatedly in a list.
+    const session = await readSsoSessionState(profile).catch(() => undefined);
+    if (session) {
+      const severity = ssoSessionSeverity(session);
+      return {
+        ...base,
+        authenticated: severity !== "expired",
+        ...(describeSsoSession(session)
+          ? { detail: describeSsoSession(session)! }
+          : {}),
+        ...(severity ? { severity } : {}),
+        // Sent so the renderer can keep the countdown moving without IPC.
+        expiresAt: session.expiresAt.toISOString(),
+        canRenewSilently: session.canRenewSilently,
+      };
+    }
+    const profiles =
+      knownProfiles ??
+      new Set((await discoverAwsProfiles().catch(() => [])).map(({ name }) => name));
+    const exists = profiles.has(profile);
+    return {
+      ...base,
+      authenticated: exists,
+      detail: exists ? "Profile ready" : "Profile not found",
+      ...(exists ? {} : { severity: "expired" as const }),
+    };
   }
-  return store.has(
+
+  const stored = await store.has(
     reference,
     scopeContext(reference.scope, storageContextFor(manifest, reference)),
   );
+  return {
+    ...base,
+    authenticated: stored,
+    detail: stored ? "Imported into keychain" : "Not imported",
+  };
+}
+
+export interface CredentialOverview {
+  /** Shared by every workspace, so they stay put as selection changes. */
+  readonly user: CredentialStatus[];
+  /** Belong to the selected workspace. */
+  readonly workspace: CredentialStatus[];
+  /** Belong to the selected target. */
+  readonly target: CredentialStatus[];
+}
+
+/**
+ * Groups credentials by sharing scope for the sidebar.
+ *
+ * User-scoped credentials are global, so they are collected across every
+ * workspace and shown regardless of what is selected. Workspace and target
+ * scoped ones follow the selection, because that is the boundary they belong
+ * to.
+ */
+export async function credentialOverview(
+  store: CredentialStore,
+  manifests: readonly WorkspaceManifest[],
+  selected: { workspaceId?: string; targetId?: string },
+): Promise<CredentialOverview> {
+  const knownProfiles = new Set(
+    (await discoverAwsProfiles().catch(() => [])).map(({ name }) => name),
+  );
+
+  const user: CredentialStatus[] = [];
+  const workspace: CredentialStatus[] = [];
+  const target: CredentialStatus[] = [];
+  const seenUserIds = new Set<string>();
+
+  for (const manifest of manifests) {
+    const isSelectedWorkspace = manifest.metadata.id === selected.workspaceId;
+    for (const reference of manifest.credentials) {
+      if (reference.scope === "user") {
+        // The same user credential may be declared by several workspaces; it
+        // resolves to one stored secret, so it is listed once.
+        if (seenUserIds.has(reference.id)) {
+          continue;
+        }
+        seenUserIds.add(reference.id);
+        user.push(
+          await credentialStatus(store, manifest, reference, knownProfiles),
+        );
+        continue;
+      }
+      if (!isSelectedWorkspace) {
+        continue;
+      }
+      if (reference.scope === "workspace") {
+        workspace.push(
+          await credentialStatus(store, manifest, reference, knownProfiles),
+        );
+        continue;
+      }
+      // Target-scoped: only the selected target's own credentials.
+      const usedByTarget = manifest.targets.some(
+        (candidate) =>
+          candidate.id === selected.targetId &&
+          candidate.operationalCredential === reference.id,
+      );
+      if (usedByTarget) {
+        target.push(
+          await credentialStatus(store, manifest, reference, knownProfiles),
+        );
+      }
+    }
+  }
+
+  return { user, workspace, target };
 }
 
 export function requireReference(

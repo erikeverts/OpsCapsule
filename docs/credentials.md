@@ -93,6 +93,23 @@ OpenCode stores a Copilot login with a zero expiry and mints a Copilot API
 token from its refresh token on demand, so that refresh token is delivered with
 it. Removing it would hand the capsule a credential that fails on first use.
 
+**A Copilot login does not expire.** The stored values are GitHub OAuth App
+user tokens, which have no default expiry, and OpenCode does not rotate them:
+the credential file stays untouched for months. What expires is the short-lived
+Copilot API token that OpenCode mints from it, roughly every half hour, inside
+the capsule. So there is nothing to renew on the host, and the sidebar shows no
+expiry for this kind of credential.
+
+Two consequences follow:
+
+- **The capsule needs egress to GitHub.** Minting that short-lived token is a
+  network call, so a target with a `deny` or `allowlist` network policy needs
+  GitHub's API reachable or Copilot cannot work at all. This is the same shape
+  as the STS requirement for Bedrock.
+- **The delivered token is long-lived.** Unlike an AWS session, which expires
+  on its own, a Copilot login stays valid until it is revoked. Removing it from
+  the capsule on teardown is therefore doing real work, not tidying up.
+
 **Claude Code cannot use GitHub Copilot.** Its model backends are the Anthropic
 API, Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform,
 Microsoft Foundry, Mantle, and Anthropic-compatible gateways. Use Bedrock for a

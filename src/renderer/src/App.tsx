@@ -6,7 +6,9 @@ import type {
   WorkspaceTargetSummary,
   TargetReadinessReport,
 } from "../../shared/contracts";
+import type { CredentialStatus } from "../../shared/credentials";
 import { TerminalPane } from "./components/TerminalPane";
+import { CredentialSidebar } from "./components/CredentialSidebar";
 import { WorkspaceEditor } from "./components/WorkspaceEditor";
 
 type EditorRoute =
@@ -162,6 +164,12 @@ export function App() {
   const [startingKey, setStartingKey] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorRoute | null>(null);
+  const [credentials, setCredentials] = useState<{
+    user: CredentialStatus[];
+    workspace: CredentialStatus[];
+    target: CredentialStatus[];
+  }>({ user: [], workspace: [], target: [] });
+  const [credentialBusyId, setCredentialBusyId] = useState<string | null>(null);
   const [readiness, setReadiness] = useState<TargetReadinessReport | null>(null);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -221,6 +229,70 @@ export function App() {
       cancelled = true;
     };
   }, [selectedTarget, selectedWorkspace]);
+
+  // Credential status is a file read, so refreshing is cheap. It is read on
+  // selection change and whenever the window regains focus, which is when a
+  // sign-in done on the host becomes relevant. The countdown itself ticks in
+  // the sidebar rather than being re-read to move a number.
+  useEffect(() => {
+    let cancelled = false;
+    const refresh = () => {
+      window.opsCapsule
+        .credentialOverview({
+          ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
+          ...(selectedTargetId ? { targetId: selectedTargetId } : {}),
+        })
+        .then((overview) => {
+          if (!cancelled) {
+            setCredentials(overview);
+          }
+        })
+        .catch(() => {
+          // The sidebar is informational; a failure must not block work.
+        });
+    };
+    refresh();
+    window.addEventListener("focus", refresh);
+    return () => {
+      cancelled = true;
+      window.removeEventListener("focus", refresh);
+    };
+  }, [selectedWorkspaceId, selectedTargetId, editor]);
+
+  async function reauthenticate(credential: CredentialStatus): Promise<void> {
+    // A user-scoped credential is global but declared by one workspace, which
+    // may not be the selected one. Acting on the selected workspace would fail
+    // to find it.
+    const workspaceId = credential.workspaceId ?? selectedWorkspaceId;
+    if (!workspaceId) {
+      return;
+    }
+    setCredentialBusyId(credential.id);
+    setError(null);
+    try {
+      if (credential.kind === "aws-profile") {
+        await window.opsCapsule.authenticateCredential({
+          workspaceId,
+          referenceId: credential.id,
+        });
+      } else {
+        await window.opsCapsule.importCredential({
+          workspaceId,
+          referenceId: credential.id,
+        });
+      }
+      setCredentials(
+        await window.opsCapsule.credentialOverview({
+          ...(selectedWorkspaceId ? { workspaceId: selectedWorkspaceId } : {}),
+          ...(selectedTargetId ? { targetId: selectedTargetId } : {}),
+        }),
+      );
+    } catch (reason) {
+      setError((reason as Error).message);
+    } finally {
+      setCredentialBusyId(null);
+    }
+  }
 
   function selectWorkspace(workspace: WorkspaceCatalogEntry): void {
     if (workspace.id === selectedWorkspaceId) {
@@ -335,6 +407,15 @@ export function App() {
         >
           <span>+</span> New workspace
         </button>
+
+        <CredentialSidebar
+          user={credentials.user}
+          workspace={credentials.workspace}
+          target={credentials.target}
+          busyId={credentialBusyId}
+          disabled={editor !== null}
+          onAction={reauthenticate}
+        />
 
         <div className="sidebar-note">
           <span className="shield">◇</span>

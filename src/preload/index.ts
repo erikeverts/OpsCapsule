@@ -29,6 +29,8 @@ const api: OpsCapsuleApi = {
     ipcRenderer.invoke(IPC.discoverLocalResources),
   credentialStatus: (workspaceId) =>
     ipcRenderer.invoke(IPC.credentialStatus, { workspaceId }),
+  credentialOverview: (input) =>
+    ipcRenderer.invoke(IPC.credentialOverview, input),
   importCredential: (input) => ipcRenderer.invoke(IPC.credentialImport, input),
   authenticateCredential: (input) =>
     ipcRenderer.invoke(IPC.credentialAuthenticate, input),

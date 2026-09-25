@@ -47,7 +47,7 @@ interface KubeconfigDocument {
   "current-context"?: string;
 }
 
-function iniSections(content: string): IniSection[] {
+export function iniSections(content: string): IniSection[] {
   const sections: IniSection[] = [];
   let current: IniSection | undefined;
   for (const line of content.split(/\r?\n/)) {

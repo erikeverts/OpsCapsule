@@ -54,6 +54,7 @@ import {
 import { createCredentialIssuer } from "../src/main/credentials/issuer.js";
 import {
   assertUsableSecret,
+  credentialOverview,
   credentialStatuses,
   requireReference,
   storageContextFor,
@@ -841,22 +842,23 @@ describe("credential service", () => {
     await store.write(manifest.credentials[0]!, "super-secret", {});
 
     const statuses = await credentialStatuses(store, manifest);
-    expect(statuses).toEqual([
+    expect(statuses).toMatchObject([
       {
         id: "central-inference",
-        name: "Copilot",
         kind: "provider-oauth",
         scope: "user",
         authenticated: true,
       },
       {
         id: "target-operational",
-        name: "Production",
         kind: "aws-profile",
         scope: "target",
         authenticated: false,
       },
     ]);
+    // An AWS credential naming no profile must say so rather than look merely
+    // unauthenticated, which would suggest importing something.
+    expect(statuses[1]!.detail).toBe("No profile selected");
     // The renderer contract must never carry credential material.
     expect(JSON.stringify(statuses)).not.toContain("super-secret");
   });
@@ -1159,5 +1161,126 @@ describe("switching the inference identity away from AWS", () => {
     expect(config.provider["amazon-bedrock"].options.profile).toBe(
       "opscapsule-inference",
     );
+  });
+});
+
+describe("credential overview grouping", () => {
+  const workspaceA = {
+    metadata: { id: "atlas", name: "Atlas" },
+    credentials: [
+      { id: "copilot", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+      { id: "shared", name: "Shared", kind: "provider-oauth", scope: "workspace", providerId: "opencode" },
+      { id: "prod-ops", name: "Prod ops", kind: "aws-profile", scope: "target" },
+      { id: "stage-ops", name: "Stage ops", kind: "aws-profile", scope: "target" },
+    ],
+    targets: [
+      { id: "production", operationalCredential: "prod-ops" },
+      { id: "staging", operationalCredential: "stage-ops" },
+    ],
+  } as unknown as Parameters<typeof credentialStatuses>[1];
+
+  const workspaceB = {
+    metadata: { id: "borealis", name: "Borealis" },
+    credentials: [
+      { id: "copilot", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+      { id: "other", name: "Other", kind: "provider-oauth", scope: "workspace", providerId: "opencode" },
+    ],
+    targets: [],
+  } as unknown as Parameters<typeof credentialStatuses>[1];
+
+  const store = () => new CredentialStore("/unused", fakeEncryptor());
+
+  it("keeps user credentials regardless of selection and lists them once", async () => {
+    const overview = await credentialOverview(store(), [workspaceA, workspaceB], {
+      workspaceId: "atlas",
+      targetId: "production",
+    });
+    // Declared by both workspaces, but one stored secret, so one entry.
+    expect(overview.user.map((entry) => entry.id)).toEqual(["copilot"]);
+  });
+
+  it("swaps workspace credentials when the selection changes", async () => {
+    const onAtlas = await credentialOverview(store(), [workspaceA, workspaceB], {
+      workspaceId: "atlas",
+    });
+    const onBorealis = await credentialOverview(store(), [workspaceA, workspaceB], {
+      workspaceId: "borealis",
+    });
+    expect(onAtlas.workspace.map((entry) => entry.id)).toEqual(["shared"]);
+    expect(onBorealis.workspace.map((entry) => entry.id)).toEqual(["other"]);
+    // User credentials are unaffected by the switch.
+    expect(onBorealis.user.map((entry) => entry.id)).toEqual(["copilot"]);
+  });
+
+  it("shows only the selected target's own credential", async () => {
+    const overview = await credentialOverview(store(), [workspaceA], {
+      workspaceId: "atlas",
+      targetId: "staging",
+    });
+    expect(overview.target.map((entry) => entry.id)).toEqual(["stage-ops"]);
+  });
+
+  it("shows user credentials before anything is selected", async () => {
+    const overview = await credentialOverview(store(), [workspaceA, workspaceB], {});
+    expect(overview.user.map((entry) => entry.id)).toEqual(["copilot"]);
+    expect(overview.workspace).toEqual([]);
+    expect(overview.target).toEqual([]);
+  });
+});
+
+describe("acting on a user credential from another workspace", () => {
+  it("reports the declaring workspace, not the selected one", async () => {
+    const declaring = {
+      metadata: { id: "ri-observability", name: "RI" },
+      credentials: [
+        { id: "copilot", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+      ],
+      targets: [],
+    } as unknown as Parameters<typeof credentialStatuses>[1];
+    const other = {
+      metadata: { id: "borealis", name: "Borealis" },
+      credentials: [],
+      targets: [],
+    } as unknown as Parameters<typeof credentialStatuses>[1];
+
+    // Selection is a workspace that does not declare it.
+    const overview = await credentialOverview(
+      new CredentialStore("/unused", fakeEncryptor()),
+      [declaring, other],
+      { workspaceId: "borealis" },
+    );
+
+    // Without this the action resolves against the selected workspace and
+    // fails with "not saved in workspace borealis".
+    expect(overview.user[0]!.workspaceId).toBe("ri-observability");
+  });
+});
+
+describe("sidebar copy stays short", () => {
+  it("keeps every status detail glanceable", async () => {
+    const manifest = {
+      metadata: { id: "atlas", name: "Atlas" },
+      credentials: [
+        { id: "copilot", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+        { id: "no-profile", name: "No profile", kind: "aws-profile", scope: "user" },
+        { id: "missing", name: "Missing", kind: "aws-profile", scope: "user", sourceProfile: "not-a-real-profile" },
+      ],
+      targets: [],
+    } as unknown as Parameters<typeof credentialStatuses>[1];
+
+    const statuses = await credentialStatuses(
+      new CredentialStore("/unused", fakeEncryptor()),
+      manifest,
+    );
+    for (const status of statuses) {
+      // The sidebar column is narrow; long sentences wrap and look broken.
+      expect(status.detail!.length).toBeLessThanOrEqual(24);
+      expect(status.detail).not.toMatch(/\.$/);
+    }
+    expect(statuses.map((entry) => entry.detail)).toEqual([
+      "Not imported",
+      "No profile selected",
+      "Profile not found",
+    ]);
   });
 });
