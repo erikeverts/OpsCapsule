@@ -20,6 +20,7 @@ import {
   resolve,
 } from "node:path";
 import { parse, stringify } from "yaml";
+import { discoverAgentLogins } from "./credentials/agent-logins.js";
 import type {
   AgentConfigurationFileOption,
   AgentConfigurationInspection,
@@ -516,10 +517,17 @@ export async function inspectDirectory(path: string): Promise<DirectoryInspectio
 }
 
 export async function discoverLocalResources(): Promise<LocalResourceOptions> {
-  const [awsProfiles, kubernetesContexts, agentConfigurationFiles] = await Promise.all([
-    discoverAwsProfiles(),
-    discoverKubernetesContexts(),
-    discoverAgentConfigurationFiles(),
-  ]);
-  return { awsProfiles, kubernetesContexts, agentConfigurationFiles };
+  const [awsProfiles, kubernetesContexts, agentConfigurationFiles, agentLogins] =
+    await Promise.all([
+      discoverAwsProfiles(),
+      discoverKubernetesContexts(),
+      discoverAgentConfigurationFiles(),
+      discoverAgentLogins(),
+    ]);
+  return {
+    awsProfiles,
+    kubernetesContexts,
+    agentConfigurationFiles,
+    agentLogins,
+  };
 }

@@ -43,6 +43,10 @@ import {
   wrapSandboxedLaunch,
 } from "../src/main/isolation/sandbox-command.js";
 import {
+  discoverAgentLogins,
+  readAgentLogin,
+} from "../src/main/credentials/agent-logins.js";
+import {
   AwsProfileError,
   exportProfileCredentials,
   profileResolves,
@@ -1062,5 +1066,28 @@ describe("inference configuration is written by the app", () => {
     );
     expect(JSON.stringify(environment)).not.toContain("broker");
     expect(JSON.stringify(environment)).not.toContain(awsInference.id);
+  });
+});
+
+describe("agent login discovery", () => {
+  it("lists logins without returning any token value", async () => {
+    const logins = await discoverAgentLogins();
+    // Discovery is best effort: a host with no agent store simply offers
+    // nothing. What matters is that no secret is ever carried.
+    for (const login of logins) {
+      expect(Object.keys(login).sort()).toEqual([
+        "id",
+        "provider",
+        "providerLabel",
+        "type",
+      ]);
+    }
+    expect(JSON.stringify(logins)).not.toMatch(/gho_|ghu_|sk-/);
+  });
+
+  it("refuses a provider it does not know", async () => {
+    await expect(readAgentLogin("not-an-agent", "github-copilot")).rejects.toThrow(
+      /No credential store is known/,
+    );
   });
 });

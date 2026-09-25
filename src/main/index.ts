@@ -34,6 +34,7 @@ import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
 import { CredentialStore, scopeContext } from "./credentials/store.js";
+import { readAgentLogin } from "./credentials/agent-logins.js";
 import { ssoLogin } from "./credentials/aws-profile.js";
 import {
   assertUsableSecret,
@@ -196,9 +197,18 @@ function registerIpcHandlers(): void {
     const { manifest } = await workspaceRegistry.document(request.workspaceId);
     const reference = requireReference(manifest, request.referenceId);
 
+    // A provider login is taken from the agent's own store on the host, so the
+    // user selects a login rather than hunting for a file, and only the
+    // selected entry is imported instead of every provider they have used.
     const secret = request.sourcePath
       ? await readSecretFromFile(request.sourcePath)
-      : request.secret;
+      : (request.secret ??
+        (reference.kind === "provider-oauth" && reference.sourceProfile
+          ? await readAgentLogin(
+              reference.providerId ?? "",
+              reference.sourceProfile,
+            )
+          : undefined));
     if (!secret) {
       throw new Error("No credential was supplied.");
     }

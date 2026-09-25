@@ -292,6 +292,7 @@ export function WorkspaceEditor({
     awsProfiles: [],
     kubernetesContexts: [],
     agentConfigurationFiles: [],
+    agentLogins: [],
   });
   const [resourceDiscoveryError, setResourceDiscoveryError] = useState<
     string | null
@@ -645,16 +646,23 @@ export function WorkspaceEditor({
     }
   }
 
-  async function importCredential(referenceId: string): Promise<void> {
-    const sourcePath = await window.opsCapsule.choosePath("file");
-    if (!sourcePath) {
+  async function importCredential(
+    referenceId: string,
+    fromAgentStore: boolean,
+  ): Promise<void> {
+    // A provider login is read from the agent's own store on the host; only a
+    // credential with no known store needs a file to be chosen.
+    const sourcePath = fromAgentStore
+      ? undefined
+      : await window.opsCapsule.choosePath("file");
+    if (!fromAgentStore && !sourcePath) {
       return;
     }
     await runCredentialAction(referenceId, () =>
       window.opsCapsule.importCredential({
         workspaceId: workspaceId!,
         referenceId,
-        sourcePath,
+        ...(sourcePath ? { sourcePath } : {}),
       }),
     );
   }
@@ -2003,19 +2011,36 @@ export function WorkspaceEditor({
 
                       {credential.kind === "provider-oauth" ? (
                         <Field
-                          label="Provider"
-                          hint="A provider login is written into the capsule for the session and removed on teardown, because the agent reads it from a file. An AWS session is never stored in the capsule at all."
+                          label="Agent login"
+                          hint="Only the selected login is imported, not every provider in the agent's credential store. It is written into the capsule for the session and removed on teardown, because the agent reads it from a file. An AWS session is never stored in the capsule at all."
                         >
-                          <input
-                            placeholder="opencode"
-                            value={credential.providerId ?? ""}
+                          <select
+                            value={
+                              credential.providerId && credential.sourceProfile
+                                ? `${credential.providerId}:${credential.sourceProfile}`
+                                : ""
+                            }
                             onChange={(event) =>
                               updateDraft((next) => {
+                                const [provider, login] =
+                                  event.target.value.split(":");
                                 next.credentials[index]!.providerId =
-                                  event.target.value || undefined;
+                                  provider || undefined;
+                                next.credentials[index]!.sourceProfile =
+                                  login || undefined;
                               })
                             }
-                          />
+                          >
+                            <option value="">Select a login…</option>
+                            {localResources.agentLogins.map((login) => (
+                              <option
+                                key={`${login.provider}:${login.id}`}
+                                value={`${login.provider}:${login.id}`}
+                              >
+                                {login.providerLabel} · {login.id}
+                              </option>
+                            ))}
+                          </select>
                         </Field>
                       ) : null}
 
@@ -2079,9 +2104,11 @@ export function WorkspaceEditor({
                                 : credential.sourceProfile
                                   ? `Profile '${credential.sourceProfile}' cannot resolve credentials. Its SSO session may have expired.`
                                   : "Select an AWS profile above."
-                              : status?.authenticated
-                                ? "A secret is held in the operating system keychain."
-                                : "No secret is stored for this reference yet."}
+                              : !credential.sourceProfile
+                                ? "Select an agent login above."
+                                : status?.authenticated
+                                  ? "The login is held in the operating system keychain."
+                                  : "This login has not been imported yet."}
                           </div>
                         </div>
                         <div className="header-actions">
@@ -2090,8 +2117,7 @@ export function WorkspaceEditor({
                             disabled={
                               busy ||
                               unsaved ||
-                              (credential.kind === "aws-profile" &&
-                                !credential.sourceProfile)
+                              !credential.sourceProfile
                             }
                             onClick={() =>
                               credential.kind === "aws-profile"
@@ -2101,7 +2127,10 @@ export function WorkspaceEditor({
                                       referenceId: credential.id,
                                     }),
                                   )
-                                : importCredential(credential.id)
+                                : importCredential(
+                                    credential.id,
+                                    Boolean(credential.sourceProfile),
+                                  )
                             }
                             type="button"
                           >
@@ -2112,8 +2141,8 @@ export function WorkspaceEditor({
                                   ? "Re-check"
                                   : "Sign in"
                                 : status?.authenticated
-                                  ? "Replace secret"
-                                  : "Import credential"}
+                                  ? "Re-import login"
+                                  : "Import login"}
                           </button>
                           {status?.authenticated &&
                           credential.kind !== "aws-profile" ? (

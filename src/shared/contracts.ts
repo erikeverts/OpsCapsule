@@ -135,10 +135,19 @@ export interface AgentConfigurationInspection {
   warnings: AgentConfigurationWarning[];
 }
 
+/** A provider login an agent already holds on this host. Identifiers only. */
+export interface AgentLoginOption {
+  provider: string;
+  providerLabel: string;
+  id: string;
+  type: string;
+}
+
 export interface LocalResourceOptions {
   awsProfiles: AwsProfileOption[];
   kubernetesContexts: KubernetesContextOption[];
   agentConfigurationFiles: AgentConfigurationFileOption[];
+  agentLogins: AgentLoginOption[];
 }
 
 export interface RuntimePaths {

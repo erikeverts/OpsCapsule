@@ -64,14 +64,17 @@ picker here, that was an earlier design and it was wrong.
 
 1. Authenticate once on the host: run `opencode` and `/connect`, then choose
    GitHub Copilot and complete the device flow.
-2. **Add credential**, set kind to **Provider login**, and set the provider to
-   `opencode`.
-3. Choose **Import credential** and select
-   `~/.local/share/opencode/auth.json`.
+2. **Add credential**, set kind to **Provider login**, and pick the **agent
+   login** from the list, for example `OpenCode · github-copilot`. The list is
+   read from the agent's own credential store on this host.
+3. **Save changes**, then choose **Import login**.
 4. Select it as the workspace **inference identity**.
 5. Choose a Copilot model in the profile's `opencode.json`, for example
    `"model": "github-copilot/gpt-5"`. The credential supplies authentication;
    which model to use is ordinary agent configuration.
+
+Only the selected login is imported. The agent's credential store usually holds
+several providers, and none of the others are read, stored, or delivered.
 
 The login is written into the capsule's agent state at launch and removed on
 teardown. Unlike an AWS session, it is briefly at rest inside the capsule,
@@ -100,7 +103,8 @@ npm run credentials -- help
 The CLI stores secrets, so it applies to provider logins. AWS profiles need no
 stored secret and are configured entirely in the UI.
 
-A central, user-scoped inference identity for Copilot through OpenCode:
+The CLI can also import a credential file directly, which is useful when an
+agent keeps its credentials somewhere the discovery does not know about:
 
 ```bash
 npm run credentials -- set \
