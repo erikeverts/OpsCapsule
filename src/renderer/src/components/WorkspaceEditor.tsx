@@ -2071,6 +2071,26 @@ export function WorkspaceEditor({
                         </Field>
                       ) : null}
 
+                      <Field
+                        label="Model"
+                        hint="Optional. Sets the model the agent uses with this identity, so starting a target needs no further configuration."
+                      >
+                        <input
+                          placeholder={
+                            credential.kind === "provider-oauth"
+                              ? "github-copilot/gpt-5"
+                              : "anthropic/claude-sonnet-4"
+                          }
+                          value={credential.model ?? ""}
+                          onChange={(event) =>
+                            updateDraft((next) => {
+                              next.credentials[index]!.model =
+                                event.target.value || undefined;
+                            })
+                          }
+                        />
+                      </Field>
+
                       {credential.kind !== "provider-oauth" ? (
                         <Field label="Region">
                           <input

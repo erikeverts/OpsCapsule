@@ -1040,12 +1040,14 @@ describe("inference configuration is written by the app", () => {
     expect(settings.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
   });
 
-  it("leaves a provider login alone, since it is delivered as a file", async () => {
+  it("writes nothing when a provider login needs no configuration", async () => {
     const base = await temporaryRoot("oc-infer-oauth-");
     await applyInferenceConfiguration({
       home: base,
       agentState: join(base, "agents"),
       adapter: "opencode",
+      // No model, and no imported Bedrock pin to clear: there is nothing to
+      // configure, so the capsule must not be handed a file it never needed.
       reference: {
         id: "copilot",
         name: "Copilot",
@@ -1088,6 +1090,72 @@ describe("agent login discovery", () => {
   it("refuses a provider it does not know", async () => {
     await expect(readAgentLogin("not-an-agent", "github-copilot")).rejects.toThrow(
       /No credential store is known/,
+    );
+  });
+});
+
+describe("switching the inference identity away from AWS", () => {
+  const copilotInference = {
+    id: "copilot",
+    name: "GitHub Copilot",
+    kind: "provider-oauth" as const,
+    scope: "user" as const,
+    providerId: "opencode",
+    sourceProfile: "github-copilot",
+    model: "github-copilot/gpt-5",
+  };
+
+  it("clears a Bedrock profile that imported configuration still pins", async () => {
+    const base = await temporaryRoot("oc-switch-");
+    const path = join(base, ".config", "opencode", "opencode.json");
+    await mkdir(dirname(path), { recursive: true });
+    // Exactly what a real imported profile looks like: a Bedrock provider
+    // pinned to a host profile that does not exist inside the capsule.
+    await writeFile(
+      path,
+      JSON.stringify({
+        $schema: "https://opencode.ai/config.json",
+        provider: {
+          amazon_bedrock: { options: { region: "us-east-1", profile: "claude-code" } },
+        },
+        plugin: ["opencode-add-dir"],
+      }),
+    );
+
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: copilotInference,
+    });
+
+    const config = JSON.parse(await readFile(path, "utf8"));
+    // The agent must not be left selecting a provider it cannot authenticate.
+    expect(JSON.stringify(config)).not.toContain("claude-code");
+    // A Bedrock provider the capsule cannot authenticate must not be left
+    // configured, or the agent starts on a provider it cannot use.
+    expect(config.provider.amazon_bedrock).toBeUndefined();
+    // The identity says which model to use, so no manual step remains.
+    expect(config.model).toBe("github-copilot/gpt-5");
+    // Unrelated configuration is preserved.
+    expect(config.plugin).toEqual(["opencode-add-dir"]);
+    expect(config.$schema).toBe("https://opencode.ai/config.json");
+  });
+
+  it("sets the model for an AWS identity too", async () => {
+    const base = await temporaryRoot("oc-switch-aws-");
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: { ...inference, model: "amazon-bedrock/claude-sonnet-4" },
+    });
+    const config = JSON.parse(
+      await readFile(join(base, ".config", "opencode", "opencode.json"), "utf8"),
+    );
+    expect(config.model).toBe("amazon-bedrock/claude-sonnet-4");
+    expect(config.provider["amazon-bedrock"].options.profile).toBe(
+      "opscapsule-inference",
     );
   });
 });

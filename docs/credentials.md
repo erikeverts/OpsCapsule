@@ -69,9 +69,14 @@ picker here, that was an earlier design and it was wrong.
    read from the agent's own credential store on this host.
 3. **Save changes**, then choose **Import login**.
 4. Select it as the workspace **inference identity**.
-5. Choose a Copilot model in the profile's `opencode.json`, for example
-   `"model": "github-copilot/gpt-5"`. The credential supplies authentication;
-   which model to use is ordinary agent configuration.
+5. Optionally set **Model** on the credential, for example
+   `github-copilot/gpt-5`, to pin which model the agent uses with this
+   identity.
+
+Switching the inference identity away from AWS also removes any Bedrock
+provider block from the capsule's agent configuration. Imported configuration
+commonly pins one, and a Bedrock provider the capsule cannot authenticate is
+what makes an agent start on the wrong provider.
 
 Only the selected login is imported. The agent's credential store usually holds
 several providers, and none of the others are read, stored, or delivered.
@@ -180,6 +185,9 @@ workspace is enough; nothing needs editing inside the capsule.
 | OpenCode | `provider."amazon-bedrock".options.profile` in `opencode.json` |
 | Claude Code | `awsCredentialExport` in `settings.json`, pointed at the broker |
 | Generic command | `OPSCAPSULE_INFERENCE_PROFILE` and `OPSCAPSULE_INFERENCE_REGION` |
+
+Setting **Model** on a credential pins the agent's model for that identity, so
+selecting an identity is enough to start working.
 
 Imported managed configuration is merged, not replaced, so a profile can still
 bring its own settings. The environment deliberately carries only the profile

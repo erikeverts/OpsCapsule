@@ -25,6 +25,10 @@ export interface InferenceConfigurationContext {
   readonly helperPath?: string;
 }
 
+/**
+ * Merges into an existing document, writing only when something changed, so a
+ * capsule is never given a configuration file it had no reason to receive.
+ */
 async function mergeJsonFile(
   path: string,
   mutate: (document: Record<string, unknown>) => void,
@@ -43,7 +47,11 @@ async function mergeJsonFile(
       document = {};
     }
   }
+  const before = JSON.stringify(document);
   mutate(document);
+  if (JSON.stringify(document) === before) {
+    return;
+  }
   await mkdir(dirname(path), { recursive: true, mode: 0o700 });
   await writeFile(path, `${JSON.stringify(document, null, 2)}\n`, {
     encoding: "utf8",
@@ -67,8 +75,48 @@ function section(
 export async function applyInferenceConfiguration(
   context: InferenceConfigurationContext,
 ): Promise<void> {
-  if (!context.reference.kind.startsWith("aws")) {
-    // A provider login is delivered as a credential file, not selected here.
+  const usesAws = context.reference.kind.startsWith("aws");
+
+  if (context.adapter === "opencode") {
+    if (!usesAws) {
+      // The identity is not AWS, so any Bedrock profile pinned by imported
+      // configuration names a host profile that does not exist in the capsule.
+      // Leaving it makes the agent select a provider it cannot authenticate.
+      await mergeJsonFile(
+        join(context.home, ".config", "opencode", "opencode.json"),
+        (document) => {
+          // Only an existing provider block is touched, so a capsule with
+          // nothing to clear is not handed a configuration file at all.
+          const provider = document.provider;
+          if (provider && typeof provider === "object" && !Array.isArray(provider)) {
+            const entries = provider as Record<string, unknown>;
+            for (const key of Object.keys(entries)) {
+              if (!/^amazon[-_]bedrock$/.test(key)) {
+                continue;
+              }
+              const entry = entries[key];
+              if (!entry || typeof entry !== "object") {
+                continue;
+              }
+              // The whole entry goes, not just the pinned profile. The
+              // capsule has no AWS inference identity, so a Bedrock provider
+              // here cannot authenticate at all, and leaving it configured is
+              // what makes the agent start on a provider it cannot use.
+              delete entries[key];
+            }
+            if (Object.keys(entries).length === 0) {
+              delete document.provider;
+            }
+          }
+          if (context.reference.model) {
+            document.model = context.reference.model;
+          }
+        },
+      );
+      return;
+    }
+  } else if (!usesAws) {
+    // Only OpenCode consumes a provider login today.
     return;
   }
 
@@ -93,6 +141,9 @@ export async function applyInferenceConfiguration(
           if (context.reference.region) {
             options.region = context.reference.region;
           }
+        }
+        if (context.reference.model) {
+          document.model = context.reference.model;
         }
       },
     );

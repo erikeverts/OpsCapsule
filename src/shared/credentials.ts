@@ -36,6 +36,12 @@ export const credentialReferenceSchema = z
     roleArn: z.string().min(1).max(2048).optional(),
     sourceProfile: z.string().min(1).max(128).optional(),
     providerId: z.string().min(1).max(64).optional(),
+    /**
+     * Optional model the agent should use with this identity, for example
+     * `github-copilot/gpt-5`. Non-secret, and the only way OpsCapsule can make
+     * a capsule deterministically use the selected provider.
+     */
+    model: z.string().min(1).max(200).optional(),
     expectedAccountId: z
       .string()
       .regex(/^\d{12}$/, "An AWS account id is twelve digits.")
