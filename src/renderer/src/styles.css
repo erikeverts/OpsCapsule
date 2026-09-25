@@ -1505,3 +1505,16 @@ a {
     display: none;
   }
 }
+
+.credential-expiry {
+  font-size: 12px;
+  color: #9aa0a6;
+}
+
+.credential-expiry.expiring {
+  color: #c8a95b;
+}
+
+.credential-expiry.expired {
+  color: #d47b72;
+}

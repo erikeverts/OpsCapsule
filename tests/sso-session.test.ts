@@ -4,6 +4,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import {
   describeSsoSession,
   readSsoSessionState,
+  ssoSessionSeverity,
 } from "../src/main/credentials/sso-session.js";
 
 const temporary: string[] = [];
@@ -45,6 +46,38 @@ const sessionConfig = [
   "sso_region = us-east-1",
   "sso_start_url = https://hsp.awsapps.com/start/#/",
 ].join("\n");
+
+describe("SSO session severity", () => {
+  const at = (minutes: number) => ({
+    expiresAt: new Date(Date.now() + minutes * 60_000),
+    canRenewSilently: false,
+  });
+
+  it("is quiet while there is comfortable time left", () => {
+    expect(ssoSessionSeverity(at(120))).toBe("ok");
+    expect(ssoSessionSeverity(at(16))).toBe("ok");
+  });
+
+  it("warns inside the last fifteen minutes", () => {
+    expect(ssoSessionSeverity(at(14))).toBe("expiring");
+    expect(ssoSessionSeverity(at(1))).toBe("expiring");
+  });
+
+  it("reports expiry once the session has lapsed", () => {
+    expect(ssoSessionSeverity(at(-1))).toBe("expired");
+  });
+
+  it("stays quiet for a session that renews itself, however close to expiry", () => {
+    // Colouring a session the CLI renews without the user would train people
+    // to ignore the colour.
+    const renewable = { expiresAt: new Date(Date.now() - 60_000), canRenewSilently: true };
+    expect(ssoSessionSeverity(renewable)).toBe("ok");
+  });
+
+  it("has no severity for a profile that does not use SSO", () => {
+    expect(ssoSessionSeverity(undefined)).toBeUndefined();
+  });
+});
 
 describe("SSO session expiry", () => {
   it("reads expiry without ever reading a token value", async () => {

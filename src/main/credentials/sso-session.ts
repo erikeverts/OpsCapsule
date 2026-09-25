@@ -149,6 +149,35 @@ export async function readSsoSessionState(
   return best;
 }
 
+/**
+ * How prominently a session should be shown.
+ *
+ * Severity is gated on whether the user actually has to do something. A
+ * session the CLI can renew by itself is not a problem however close to expiry
+ * it is, and colouring it would train people to ignore the colour.
+ */
+export type SsoSessionSeverity = "ok" | "expiring" | "expired";
+
+/** Amber inside this window, because a sign-in takes a browser round trip. */
+export const SSO_EXPIRY_WARNING_MS = 15 * 60_000;
+
+export function ssoSessionSeverity(
+  state: SsoSessionState | undefined,
+  now = new Date(),
+): SsoSessionSeverity | undefined {
+  if (!state) {
+    return undefined;
+  }
+  if (state.canRenewSilently) {
+    return "ok";
+  }
+  const remainingMs = state.expiresAt.getTime() - now.getTime();
+  if (remainingMs <= 0) {
+    return "expired";
+  }
+  return remainingMs < SSO_EXPIRY_WARNING_MS ? "expiring" : "ok";
+}
+
 export function describeSsoSession(
   state: SsoSessionState | undefined,
   now = new Date(),
