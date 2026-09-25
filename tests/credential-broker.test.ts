@@ -1134,7 +1134,9 @@ describe("switching the inference identity away from AWS", () => {
     expect(JSON.stringify(config)).not.toContain("claude-code");
     // A Bedrock provider the capsule cannot authenticate must not be left
     // configured, or the agent starts on a provider it cannot use.
-    expect(config.provider.amazon_bedrock).toBeUndefined();
+    expect(config.provider?.amazon_bedrock).toBeUndefined();
+    // An emptied provider block is removed rather than left behind.
+    expect(config.provider).toBeUndefined();
     // The identity says which model to use, so no manual step remains.
     expect(config.model).toBe("github-copilot/gpt-5");
     // Unrelated configuration is preserved.
