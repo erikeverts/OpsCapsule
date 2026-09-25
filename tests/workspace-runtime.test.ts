@@ -378,3 +378,202 @@ describe("workspace runtime isolation", () => {
     );
   });
 });
+
+describe("brokered credentials in the launch path", () => {
+  async function prepare(options: {
+    withCredentials: boolean;
+    kind?: "aws-profile" | "provider-oauth";
+    inferenceOnly?: boolean;
+  }) {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-broker-"));
+    temporaryDirectories.push(baseDirectory);
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const source = await registry.document("atlas");
+    const manifest = structuredClone(source.manifest);
+    manifest.metadata = { id: "brokered", name: "Brokered" };
+    manifest.targets = manifest.targets.slice(0, 1);
+    manifest.agentProfiles = [
+      {
+        id: "opencode",
+        name: "OpenCode",
+        adapter: "opencode",
+        runtime: { command: "opencode", args: [] },
+        configuration: { files: [] },
+        environment: {},
+      },
+    ];
+    manifest.defaultAgentProfile = "opencode";
+    delete manifest.targets[0]!.agentProfile;
+    delete manifest.targets[0]!.agentRuntime;
+
+    if (options.withCredentials) {
+      const kind = options.kind ?? "aws-profile";
+      if (kind === "provider-oauth") {
+        manifest.credentials = [
+          {
+            id: "central-inference",
+            name: "GitHub Copilot",
+            kind: "provider-oauth",
+            scope: "user",
+            providerId: "opencode",
+          },
+        ];
+        manifest.inferenceCredential = "central-inference";
+      } else {
+        manifest.credentials = [
+          {
+            id: "target-operational",
+            name: "Customer production",
+            kind: "aws-profile",
+            scope: "target",
+            region: "eu-west-1",
+          },
+          {
+            id: "central-inference",
+            name: "Central Bedrock",
+            kind: "aws-profile",
+            scope: "user",
+            region: "us-east-1",
+          },
+        ];
+        manifest.inferenceCredential = "central-inference";
+        if (!options.inferenceOnly) {
+          manifest.targets[0]!.operationalCredential = "target-operational";
+        }
+      }
+    }
+
+    const created = await registry.create(manifest);
+    const resolved = await registry.resolveTarget(
+      created.manifest.metadata.id,
+      created.manifest.targets[0]!.id,
+    );
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "00000000-aaaa-bbbb-cccc-000000000001",
+      resolved,
+      async () => JSON.stringify({ github: { type: "oauth", access: "tok" } }),
+    );
+    return { runtime, resolved };
+  }
+
+  it("keeps the target cloud profile when only an inference credential is brokered", async () => {
+    // Reproduces a real failure: brokering only a Bedrock inference identity
+    // overwrote the capsule's AWS config, removing the very profile
+    // AWS_PROFILE names, so the agent could load no credentials at all.
+    const { runtime, resolved } = await prepare({
+      withCredentials: true,
+      inferenceOnly: true,
+    });
+
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+
+    // The app selects the inference profile for the agent; the user never
+    // edits configuration inside the capsule.
+    const openCodeConfig = JSON.parse(
+      await readFile(
+        join(runtime.home, ".config", "opencode", "opencode.json"),
+        "utf8",
+      ),
+    );
+    expect(
+      openCodeConfig.provider["amazon-bedrock"].options.profile,
+    ).toBe("opscapsule-inference");
+
+    expect(awsConfig).toContain("[profile opscapsule-inference]");
+    // The target keeps its own operational profile: brokering inference alone
+    // must not repoint or remove the identity the capsule works with.
+    expect(environment.AWS_PROFILE).toBe("atlas-nonprod");
+    expect(environment.AWS_PROFILE).not.toBe("opscapsule-inference");
+    expect(environment.AWS_PROFILE).not.toBe("default");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("points the environment at the brokered operational profile", async () => {
+    const { runtime, resolved } = await prepare({ withCredentials: true });
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+
+    // A brokered operational identity is written as the default profile, so
+    // the environment has to name it rather than the imported cloud profile.
+    expect(environment.AWS_PROFILE).toBe("default");
+    expect(awsConfig).toContain("[default]");
+    expect(awsConfig).toContain("target-operational");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("gives a capsule no broker channel when its credentials are materialized", async () => {
+    // A Copilot-backed capsule reads a file; nothing pulls, so it must not be
+    // granted a unix socket into the main process.
+    const { runtime } = await prepare({
+      withCredentials: true,
+      kind: "provider-oauth",
+    });
+    expect(runtime.brokerSocket).toBeUndefined();
+    expect(runtime.brokerHelper).toBeUndefined();
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("gives a capsule no broker channel when no credentials are declared", async () => {
+    const { runtime } = await prepare({ withCredentials: false });
+    expect(runtime.brokerSocket).toBeUndefined();
+    expect(runtime.brokerHelper).toBeUndefined();
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("materializes a helper and two named profiles when credentials are declared", async () => {
+    const { runtime, resolved } = await prepare({ withCredentials: true });
+
+    expect(runtime.brokerSocket).toBeDefined();
+    expect(runtime.brokerHelper).toBeDefined();
+
+    // A unix socket path is capped at 104 bytes on macOS. Placing it under the
+    // session root exceeded that for the real Application Support path and
+    // failed at listen() with EINVAL, so it must live in the short temp path.
+    expect(runtime.brokerSocket!.startsWith(runtime.temp)).toBe(true);
+    expect(Buffer.byteLength(runtime.brokerSocket!) + 1).toBeLessThanOrEqual(104);
+
+    // credential_process and awsCredentialExport are parsed as command lines,
+    // so a helper path containing a space is split and never found. The real
+    // userData path, "~/Library/Application Support/...", always contains one.
+    expect(runtime.brokerHelper!).not.toMatch(/\s/);
+    expect(runtime.brokerHelper!.startsWith(runtime.temp)).toBe(true);
+    expect(resolved.credentials.operational?.id).toBe("target-operational");
+    expect(resolved.credentials.inference?.id).toBe("central-inference");
+
+    const helper = await readFile(runtime.brokerHelper!, "utf8");
+    expect(helper).toContain("OPSCAPSULE_BROKER_TOKEN");
+    expect(helper).toContain(runtime.brokerSocket!);
+
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+    // Operational is the default profile; inference is named but not default.
+    expect(awsConfig).toContain("[default]");
+    expect(awsConfig).toContain(
+      `credential_process = ${runtime.brokerHelper} target-operational`,
+    );
+    expect(awsConfig).toContain("[profile opscapsule-inference]");
+    expect(awsConfig).toContain(
+      `credential_process = ${runtime.brokerHelper} central-inference`,
+    );
+
+    // The environment must still name only the operational identity.
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+    expect(environment.AWS_PROFILE).not.toBe("opscapsule-inference");
+    expect(JSON.stringify(environment)).not.toContain("central-inference");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
+});

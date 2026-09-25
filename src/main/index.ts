@@ -7,11 +7,16 @@ import {
   ipcMain,
   net,
   protocol,
+  safeStorage,
   utilityProcess,
 } from "electron";
 import {
   choosePathInput,
   createWorkspaceInput,
+  credentialAuthenticateInput,
+  credentialForgetInput,
+  credentialImportInput,
+  credentialStatusInput,
   deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
@@ -25,6 +30,20 @@ import {
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
 import { prepareIsolation } from "./isolation/prepare.js";
+import { CredentialBrokerSession } from "./credentials/broker.js";
+import { createBrokerToken } from "./credentials/helper.js";
+import { createCredentialIssuer } from "./credentials/issuer.js";
+import { CredentialStore, scopeContext } from "./credentials/store.js";
+import { readAgentLogin } from "./credentials/agent-logins.js";
+import { ssoLogin } from "./credentials/aws-profile.js";
+import {
+  assertUsableSecret,
+  credentialStatuses,
+  readSecretFromFile,
+  requireReference,
+  storageContextFor,
+} from "./credentials/service.js";
+import type { CapsuleBroker } from "./terminal-manager.js";
 import {
   cleanupStaleWorkspaceRuntimes,
   cleanupWorkspaceRuntime,
@@ -164,6 +183,81 @@ function registerIpcHandlers(): void {
     );
   });
 
+  const credentialStoreFor = () =>
+    new CredentialStore(app.getPath("userData"), safeStorage);
+
+  ipcMain.handle(IPC.credentialStatus, async (_event, input: unknown) => {
+    const { workspaceId } = credentialStatusInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(workspaceId);
+    return credentialStatuses(credentialStoreFor(), manifest);
+  });
+
+  ipcMain.handle(IPC.credentialImport, async (_event, input: unknown) => {
+    const request = credentialImportInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+
+    // A provider login is taken from the agent's own store on the host, so the
+    // user selects a login rather than hunting for a file, and only the
+    // selected entry is imported instead of every provider they have used.
+    const secret = request.sourcePath
+      ? await readSecretFromFile(request.sourcePath)
+      : (request.secret ??
+        (reference.kind === "provider-oauth" && reference.sourceProfile
+          ? await readAgentLogin(
+              reference.providerId ?? "",
+              reference.sourceProfile,
+            )
+          : undefined));
+    if (!secret) {
+      throw new Error("No credential was supplied.");
+    }
+    assertUsableSecret(reference, secret);
+
+    const store = credentialStoreFor();
+    await store.write(
+      reference,
+      secret,
+      scopeContext(
+        reference.scope,
+        storageContextFor(manifest, reference, request.targetId),
+      ),
+    );
+    // Only status returns to the renderer; the secret never does.
+    return credentialStatuses(store, manifest);
+  });
+
+  ipcMain.handle(IPC.credentialAuthenticate, async (_event, input: unknown) => {
+    const request = credentialAuthenticateInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+    if (reference.kind !== "aws-profile") {
+      throw new Error(
+        `'${reference.name}' is authenticated by importing a credential, not by signing in.`,
+      );
+    }
+    if (!reference.sourceProfile) {
+      throw new Error(`Select an AWS profile for '${reference.name}' first.`);
+    }
+    await ssoLogin(reference.sourceProfile);
+    return credentialStatuses(credentialStoreFor(), manifest);
+  });
+
+  ipcMain.handle(IPC.credentialForget, async (_event, input: unknown) => {
+    const request = credentialForgetInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+    const store = credentialStoreFor();
+    await store.forget(
+      reference,
+      scopeContext(
+        reference.scope,
+        storageContextFor(manifest, reference, request.targetId),
+      ),
+    );
+    return credentialStatuses(store, manifest);
+  });
+
   ipcMain.handle(IPC.startWorkspace, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);
     const resolvedTarget = await workspaceRegistry.resolveTarget(
@@ -171,20 +265,56 @@ function registerIpcHandlers(): void {
       targetId,
     );
     const sessionId = terminalManager.createSessionId();
+    const credentialStore = new CredentialStore(
+      app.getPath("userData"),
+      safeStorage,
+    );
+    const credentialContext = {
+      workspaceId: resolvedTarget.workspace.manifest.metadata.id,
+      targetId: resolvedTarget.target.id,
+    };
     const runtime = await createWorkspaceRuntime(
       app.getPath("userData"),
       sessionId,
       resolvedTarget,
+      (reference) =>
+        credentialStore.read(
+          reference,
+          scopeContext(reference.scope, credentialContext),
+        ),
     );
+    let broker: CredentialBrokerSession | undefined;
     try {
       const isolation = await prepareIsolation(runtime, resolvedTarget);
+
+      const references = [
+        resolvedTarget.credentials.operational,
+        resolvedTarget.credentials.inference,
+      ].filter((reference) => reference !== undefined);
+
+      let brokerHandle: CapsuleBroker | undefined;
+      if (runtime.brokerSocket && references.length > 0) {
+        const token = createBrokerToken();
+        broker = new CredentialBrokerSession({
+          socketPath: runtime.brokerSocket,
+          token,
+          references,
+          issue: createCredentialIssuer(credentialStore, credentialContext),
+        });
+        await broker.listen();
+        const session = broker;
+        brokerHandle = { token, close: () => session.close() };
+      }
+
       return await terminalManager.startWorkspace(
         sessionId,
         resolvedTarget,
         runtime,
         isolation,
+        brokerHandle,
       );
     } catch (error) {
+      await broker?.close();
       await cleanupWorkspaceRuntime(runtime);
       throw error;
     }

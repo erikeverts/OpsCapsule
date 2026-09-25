@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { credentialReferenceSchema } from "./credentials.js";
 
 const identifier = z
   .string()
@@ -226,6 +227,8 @@ export const targetSchema = z.object({
   defaultDirectory: identifier,
   agentProfile: identifier.optional(),
   agentRuntime: commandRuntimeSchema.optional(),
+  /** Brokered operational identity. Stays the capsule's default AWS profile. */
+  operationalCredential: identifier.optional(),
   isolation: z.object({
     mode: z.enum(["enforced", "context-only"]).default("enforced"),
     network: networkPolicySchema.default({
@@ -246,6 +249,18 @@ export const workspaceManifestSchema = z.object({
   agentInstructions: z.string().max(50_000).optional(),
   agentProfiles: z.array(agentProfileSchema).default([]),
   defaultAgentProfile: identifier.optional(),
+  /**
+   * Credential *references*, never credential values. Safe to serialize and
+   * safe to show the renderer; secret material lives only in the OS-backed
+   * credential store.
+   */
+  credentials: z.array(credentialReferenceSchema).default([]),
+  /**
+   * The inference identity, used only by the model provider. Normally
+   * user-scoped so one central Bedrock account is reused everywhere, while
+   * operational identities stay target-scoped.
+   */
+  inferenceCredential: identifier.optional(),
   cloudConnections: z.array(cloudConnectionSchema).default([]),
   kubernetesContexts: z.array(kubernetesContextSchema).default([]),
   directories: z.array(directorySchema).min(1),
@@ -280,6 +295,7 @@ export function validateWorkspaceReferences(
   assertUniqueIds(manifest.directories, "directory");
   assertUniqueIds(manifest.targets, "target");
   assertUniqueIds(manifest.agentProfiles, "agent profile");
+  assertUniqueIds(manifest.credentials, "credential reference");
 
   const cloudIds = new Set(manifest.cloudConnections.map(({ id }) => id));
   const kubernetesIds = new Set(
@@ -287,6 +303,16 @@ export function validateWorkspaceReferences(
   );
   const directoryIds = new Set(manifest.directories.map(({ id }) => id));
   const agentProfileIds = new Set(manifest.agentProfiles.map(({ id }) => id));
+  const credentialIds = new Set(manifest.credentials.map(({ id }) => id));
+
+  if (
+    manifest.inferenceCredential &&
+    !credentialIds.has(manifest.inferenceCredential)
+  ) {
+    throw new Error(
+      `Workspace references unknown inference credential '${manifest.inferenceCredential}'`,
+    );
+  }
 
   if (
     manifest.defaultAgentProfile &&
@@ -310,6 +336,22 @@ export function validateWorkspaceReferences(
     ) {
       throw new Error(
         `Target '${target.id}' needs an agent profile, a workspace default, or a legacy agent runtime`,
+      );
+    }
+    if (
+      target.operationalCredential &&
+      !credentialIds.has(target.operationalCredential)
+    ) {
+      throw new Error(
+        `Target '${target.id}' references unknown operational credential '${target.operationalCredential}'`,
+      );
+    }
+    if (
+      target.operationalCredential &&
+      target.operationalCredential === manifest.inferenceCredential
+    ) {
+      throw new Error(
+        `Target '${target.id}' must not reuse the inference credential as its operational identity`,
       );
     }
     if (target.cloudConnection && !cloudIds.has(target.cloudConnection)) {

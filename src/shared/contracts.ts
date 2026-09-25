@@ -1,4 +1,5 @@
 import { z } from "zod";
+import type { CredentialStatus } from "./credentials.js";
 import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
@@ -134,10 +135,19 @@ export interface AgentConfigurationInspection {
   warnings: AgentConfigurationWarning[];
 }
 
+/** A provider login an agent already holds on this host. Identifiers only. */
+export interface AgentLoginOption {
+  provider: string;
+  providerLabel: string;
+  id: string;
+  type: string;
+}
+
 export interface LocalResourceOptions {
   awsProfiles: AwsProfileOption[];
   kubernetesContexts: KubernetesContextOption[];
   agentConfigurationFiles: AgentConfigurationFileOption[];
+  agentLogins: AgentLoginOption[];
 }
 
 export interface RuntimePaths {
@@ -149,6 +159,12 @@ export interface RuntimePaths {
   targetState: string;
   agentState: string;
   agentInstructions?: string;
+  /**
+   * Present only when this capsule brokers credentials. Paths only; no
+   * credential value ever crosses the IPC boundary.
+   */
+  brokerSocket?: string;
+  brokerHelper?: string;
 }
 
 export type ReadinessCheckStatus = "pass" | "warning" | "fail";
@@ -260,6 +276,31 @@ export const stopWorkspaceInput = z.object({
   sessionId: z.string().min(1),
 });
 
+export const credentialStatusInput = z.object({
+  workspaceId: z.string().min(1),
+});
+
+export const credentialImportInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+  targetId: z.string().min(1).optional(),
+  /** Absolute path of a file to import. Chosen by the user, read in main. */
+  sourcePath: z.string().min(1).optional(),
+  /** Pasted secret. Never logged and never returned to the renderer. */
+  secret: z.string().min(1).max(200_000).optional(),
+});
+
+export const credentialAuthenticateInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+});
+
+export const credentialForgetInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+  targetId: z.string().min(1).optional(),
+});
+
 export interface OpsCapsuleApi {
   listWorkspaces(): Promise<WorkspaceCatalog>;
   getWorkspace(workspaceId: string): Promise<WorkspaceDocument>;
@@ -277,6 +318,33 @@ export interface OpsCapsuleApi {
     workspaceId?: string,
   ): Promise<AgentConfigurationInspection>;
   discoverLocalResources(): Promise<LocalResourceOptions>;
+  /** Authentication status for every credential the workspace declares. */
+  credentialStatus(workspaceId: string): Promise<CredentialStatus[]>;
+  /**
+   * Stores a secret for a declared reference. Either a file the user picked or
+   * a pasted value; the secret itself never travels back to the renderer.
+   */
+  importCredential(input: {
+    workspaceId: string;
+    referenceId: string;
+    targetId?: string;
+    sourcePath?: string;
+    secret?: string;
+  }): Promise<CredentialStatus[]>;
+  /**
+   * Runs the provider's interactive sign-in in the main process. Used by
+   * AWS profiles, whose credentials are never stored by OpsCapsule.
+   */
+  authenticateCredential(input: {
+    workspaceId: string;
+    referenceId: string;
+  }): Promise<CredentialStatus[]>;
+  /** Sign out. Removes the stored secret, keeping the reference. */
+  forgetCredential(input: {
+    workspaceId: string;
+    referenceId: string;
+    targetId?: string;
+  }): Promise<CredentialStatus[]>;
   checkTargetReadiness(
     workspaceId: string,
     targetId: string,

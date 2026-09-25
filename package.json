@@ -41,7 +41,9 @@
     "verify:release-tag": "node scripts/verify-release-tag.mjs",
     "prepare:release": "node scripts/prepare-release-artifacts.mjs",
     "start": "npm run build && electron .",
-    "postinstall": "node scripts/check-node-version.mjs && electron-rebuild -f -w node-pty"
+    "postinstall": "node scripts/check-node-version.mjs && electron-rebuild -f -w node-pty",
+    "build:credentials-cli": "esbuild src/main/credentials/cli.ts --bundle --platform=node --format=cjs --target=node24 --outfile=dist/credentials-cli.cjs --external:electron",
+    "credentials": "npm run build:credentials-cli && electron dist/credentials-cli.cjs"
   },
   "dependencies": {
     "@anthropic-ai/sandbox-runtime": "0.0.76",

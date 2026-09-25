@@ -24,6 +24,7 @@ function workspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
+    credentials: [],
     cloudConnections: [
       { id: "aws", name: "AWS", provider: "aws", config: {} },
     ],

@@ -112,4 +112,8 @@ configuration and decisions. The Iteration 4 agent-profile contract is described
 [agent profiles](docs/agent-profiles.md) and
 [ADR 0005](docs/adr/0005-managed-agent-profiles.md). The application-owned
 terminal runtime and `RunAsNode` decision are documented in
-[ADR 0006](docs/adr/0006-terminal-utility-process.md).
+[ADR 0006](docs/adr/0006-terminal-utility-process.md). The proposed credential
+broker, credential scopes, and the separation between operational and inference
+identities are described in
+[ADR 0007](docs/adr/0007-credential-broker-and-inference-identity.md), with
+setup and testing steps in [credentials](docs/credentials.md).

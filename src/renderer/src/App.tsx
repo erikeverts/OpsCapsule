@@ -239,7 +239,10 @@ export function App() {
     );
     setSelectedWorkspaceId(workspaceId);
     setSelectedTargetId(workspace?.targets[0]?.id ?? "");
-    setEditor(null);
+    // Saving keeps the studio open. Credential actions operate on the saved
+    // manifest, so closing here forced a save, reopen, and re-navigate just to
+    // authenticate something that had only just been declared.
+    setEditor({ mode: "edit", workspaceId });
     setError(null);
   }
 
