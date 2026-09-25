@@ -67,60 +67,41 @@ describe("SSO session severity", () => {
     expect(ssoSessionSeverity(at(-1))).toBe("expired");
   });
 
-  it("shows no countdown for a session that renews itself", () => {
-    // Real AWS SSO access tokens last about an hour and refresh silently, so
-    // a remaining-time figure is noise rather than information.
-    expect(
-      describeSsoSession({
-        expiresAt: new Date(Date.now() + 29 * 60_000),
-        canRenewSilently: true,
-        renewableUntil: new Date(Date.now() + 59 * 86_400_000),
-      }),
-    ).toBe("Signed in");
-  });
-
-  it("counts down to the registration deadline, not the access token", () => {
-    // The refresh registration is what eventually forces an interactive
-    // sign-in, and without this the user would get at most an hour of notice.
+  it("counts down the access token even when a refresh token exists", () => {
+    // A refresh token does not mean renewal happens. How long a user stays
+    // signed in is the Identity Center session duration, commonly eight
+    // hours, and it is not in the cache. Trusting the ninety day client
+    // registration produced a two month deadline on a host that in fact
+    // signed in every morning.
     const state = {
-      expiresAt: new Date(Date.now() + 40 * 60_000),
+      expiresAt: new Date(Date.now() + 6 * 3_600_000),
       canRenewSilently: true,
-      renewableUntil: new Date(Date.now() + 6 * 3_600_000),
+      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
     expect(describeSsoSession(state)).toBe("Signed in, 6h left");
     expect(ssoSessionSeverity(state)).toBe("ok");
   });
 
-  it("warns as the registration deadline arrives", () => {
+  it("warns as the access token runs out, refresh token or not", () => {
     const state = {
-      expiresAt: new Date(Date.now() + 40 * 60_000),
+      expiresAt: new Date(Date.now() + 10 * 60_000),
       canRenewSilently: true,
-      renewableUntil: new Date(Date.now() + 10 * 60_000),
+      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
-    // The access token is still fine, but renewal is about to stop working.
     expect(ssoSessionSeverity(state)).toBe("expiring");
     expect(describeSsoSession(state)).toBe("Expires in 10m");
   });
 
-  it("reports expiry once renewal is no longer possible", () => {
-    const state = {
-      expiresAt: new Date(Date.now() + 40 * 60_000),
-      canRenewSilently: true,
-      renewableUntil: new Date(Date.now() - 60_000),
-    };
-    expect(ssoSessionSeverity(state)).toBe("expired");
-  });
-
-  it("stays quiet for an expired access token that renews itself", () => {
-    // Colouring a session the CLI renews without the user would train people
-    // to ignore the colour.
+  it("does not claim an expired session is fine because it might renew", () => {
     const renewable = {
       expiresAt: new Date(Date.now() - 60_000),
       canRenewSilently: true,
       renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
-    expect(ssoSessionSeverity(renewable)).toBe("ok");
-    expect(describeSsoSession(renewable)).toBe("Signed in");
+    expect(ssoSessionSeverity(renewable)).toBe("expired");
+    // Honest about the uncertainty: it may renew, and if it does the next
+    // read clears this by itself.
+    expect(describeSsoSession(renewable)).toBe("Renewing or expired");
   });
 
   it("has no severity for a profile that does not use SSO", () => {
@@ -195,7 +176,7 @@ describe("SSO session expiry", () => {
     expect(state!.renewableUntil?.toISOString()).toBe(nextYear);
   });
 
-  it("does not report an expired session that renews itself", async () => {
+  it("still records whether a refresh token is present", async () => {
     const paths = await fixture({
       config: sessionConfig,
       tokens: [
@@ -211,8 +192,9 @@ describe("SSO session expiry", () => {
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     // Warning here would be a false alarm: the CLI renews without the user.
     expect(state!.canRenewSilently).toBe(true);
-    // A countdown here would show an alarming number for a non-event.
-    expect(describeSsoSession(state)).toBe("Signed in");
+    // Present, but it does not suppress the warning: the session may still
+    // require an interactive sign-in and the cache cannot tell us.
+    expect(describeSsoSession(state)).toBe("Renewing or expired");
   });
 
   it("reports an expired session whose registration has also lapsed", async () => {
