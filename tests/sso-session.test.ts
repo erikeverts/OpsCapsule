@@ -37,6 +37,11 @@ async function fixture(options: {
   return { configFile, cacheDirectory };
 }
 
+// A fixed clock. Deriving "now" separately inside the formatter loses a
+// millisecond and floors 6h to "5h left", which passes or fails by timing.
+const NOW = new Date("2026-09-25T12:00:00.000Z");
+const fromNow = (ms: number) => new Date(NOW.getTime() + ms);
+
 const inOneHour = new Date(Date.now() + 3_600_000).toISOString();
 const anHourAgo = new Date(Date.now() - 3_600_000).toISOString();
 const nextYear = new Date(Date.now() + 365 * 86_400_000).toISOString();
@@ -53,22 +58,22 @@ const sessionConfig = [
 
 describe("SSO session severity", () => {
   const at = (minutes: number) => ({
-    expiresAt: new Date(Date.now() + minutes * 60_000),
+    expiresAt: fromNow(minutes * 60_000),
     canRenewSilently: false,
   });
 
   it("is quiet while there is comfortable time left", () => {
-    expect(ssoSessionSeverity(at(120))).toBe("ok");
-    expect(ssoSessionSeverity(at(16))).toBe("ok");
+    expect(ssoSessionSeverity(at(120), NOW)).toBe("ok");
+    expect(ssoSessionSeverity(at(16), NOW)).toBe("ok");
   });
 
   it("warns inside the last fifteen minutes", () => {
-    expect(ssoSessionSeverity(at(14))).toBe("expiring");
-    expect(ssoSessionSeverity(at(1))).toBe("expiring");
+    expect(ssoSessionSeverity(at(14), NOW)).toBe("expiring");
+    expect(ssoSessionSeverity(at(1), NOW)).toBe("expiring");
   });
 
   it("reports expiry once the session has lapsed", () => {
-    expect(ssoSessionSeverity(at(-1))).toBe("expired");
+    expect(ssoSessionSeverity(at(-1), NOW)).toBe("expired");
   });
 
   it("counts down the access token even when a refresh token exists", () => {
@@ -77,36 +82,27 @@ describe("SSO session severity", () => {
     // hours, and it is not in the cache. Trusting the ninety day client
     // registration produced a two month deadline on a host that in fact
     // signed in every morning.
-    const state = {
-      expiresAt: new Date(Date.now() + 6 * 3_600_000),
-      canRenewSilently: true,
-    };
-    expect(describeSsoSession(state)).toBe("Signed in, 6h left");
-    expect(ssoSessionSeverity(state)).toBe("ok");
+    const state = { expiresAt: fromNow(6 * 3_600_000), canRenewSilently: true };
+    expect(describeSsoSession(state, NOW)).toBe("Signed in, 6h left");
+    expect(ssoSessionSeverity(state, NOW)).toBe("ok");
   });
 
   it("warns as the access token runs out, refresh token or not", () => {
-    const state = {
-      expiresAt: new Date(Date.now() + 10 * 60_000),
-      canRenewSilently: true,
-    };
-    expect(ssoSessionSeverity(state)).toBe("expiring");
-    expect(describeSsoSession(state)).toBe("Expires in 10m");
+    const state = { expiresAt: fromNow(10 * 60_000), canRenewSilently: true };
+    expect(ssoSessionSeverity(state, NOW)).toBe("expiring");
+    expect(describeSsoSession(state, NOW)).toBe("Expires in 10m");
   });
 
   it("does not claim an expired session is fine because it might renew", () => {
-    const renewable = {
-      expiresAt: new Date(Date.now() - 60_000),
-      canRenewSilently: true,
-    };
-    expect(ssoSessionSeverity(renewable)).toBe("expired");
+    const renewable = { expiresAt: fromNow(-60_000), canRenewSilently: true };
+    expect(ssoSessionSeverity(renewable, NOW)).toBe("expired");
     // Honest about the uncertainty: it may renew, and if it does the next
     // read clears this by itself.
-    expect(describeSsoSession(renewable)).toBe("Renewing or expired");
+    expect(describeSsoSession(renewable, NOW)).toBe("Renewing or expired");
   });
 
   it("has no severity for a profile that does not use SSO", () => {
-    expect(ssoSessionSeverity(undefined)).toBeUndefined();
+    expect(ssoSessionSeverity(undefined, NOW)).toBeUndefined();
   });
 });
 
@@ -230,24 +226,24 @@ describe("shared countdown formatting", () => {
   it("produces the same text in the renderer as the main process", () => {
     // The sidebar recomputes the countdown locally between reads, so the two
     // must not drift apart in wording or thresholds.
-    const expiresAt = new Date(Date.now() + 90 * 60_000);
+    const expiresAt = fromNow(90 * 60_000);
     const state = { expiresAt, canRenewSilently: false };
-    expect(describeSsoSession(state)).toBe(
-      describeSsoExpiry(expiresAt, false),
+    expect(describeSsoSession(state, NOW)).toBe(
+      describeSsoExpiry(expiresAt, false, NOW),
     );
-    expect(ssoSessionSeverity(state)).toBe(ssoSeverityFor(expiresAt));
+    expect(ssoSessionSeverity(state, NOW)).toBe(ssoSeverityFor(expiresAt, NOW));
   });
 
   it("moves the countdown forward as time passes", () => {
-    const expiresAt = new Date(Date.now() + 60 * 60_000);
-    const later = new Date(Date.now() + 30 * 60_000);
-    expect(describeSsoExpiry(expiresAt, false)).toBe("Signed in, 1h left");
+    const expiresAt = fromNow(60 * 60_000);
+    const later = fromNow(30 * 60_000);
+    expect(describeSsoExpiry(expiresAt, false, NOW)).toBe("Signed in, 1h left");
     expect(describeSsoExpiry(expiresAt, false, later)).toBe("Expires in 30m");
     expect(ssoSeverityFor(expiresAt, later)).toBe("ok");
   });
 
   it("crosses into amber and then red without a re-read", () => {
-    const expiresAt = new Date(Date.now() + 60 * 60_000);
+    const expiresAt = fromNow(60 * 60_000);
     const nearlyDue = new Date(expiresAt.getTime() - 10 * 60_000);
     const overdue = new Date(expiresAt.getTime() + 60_000);
     expect(ssoSeverityFor(expiresAt, nearlyDue)).toBe("expiring");
