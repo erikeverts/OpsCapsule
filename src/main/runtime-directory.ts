@@ -21,6 +21,7 @@ import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { writeBrokerHelper } from "./credentials/helper.js";
 import { CredentialDeliveryRegistry } from "./credentials/delivery/registry.js";
+import { OPERATIONAL_PROFILE_NAME } from "./credentials/delivery/aws.js";
 import type { CredentialReference } from "../shared/credentials.js";
 import {
   extractKubeconfigContext,
@@ -481,9 +482,34 @@ export function buildWorkspaceEnvironment(
       })
     : {};
 
+  // A brokered operational identity is written as the default profile, so the
+  // environment has to name it. Without this the capsule keeps pointing at the
+  // imported cloud profile and never reaches the broker.
+  const brokeredAws: Record<string, string> =
+    resolvedTarget.credentials.operational?.kind.startsWith("aws")
+      ? { AWS_PROFILE: OPERATIONAL_PROFILE_NAME }
+      : {};
+
+  // When AWS identities are brokered without a cloud connection there is no
+  // cloud adapter to point the SDK at the capsule's config file.
+  const brokeredAwsPaths: Record<string, string> =
+    !resolvedTarget.cloud &&
+    (resolvedTarget.credentials.operational ?? resolvedTarget.credentials.inference)
+      ? {
+          AWS_CONFIG_FILE: join(runtime.targetState, ".aws", "config"),
+          AWS_SHARED_CREDENTIALS_FILE: join(
+            runtime.targetState,
+            ".aws",
+            "credentials",
+          ),
+        }
+      : {};
+
   return {
     ...environment,
     ...cloudEnvironment,
+    ...brokeredAwsPaths,
+    ...brokeredAws,
     HOME: runtime.home,
     ZDOTDIR: runtime.home,
     XDG_CONFIG_HOME: join(runtime.home, ".config"),

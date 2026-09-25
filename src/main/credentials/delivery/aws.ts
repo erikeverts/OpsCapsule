@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import type { CredentialReference } from "../../../shared/credentials.js";
 import type {
@@ -33,15 +33,27 @@ export class AwsCredentialDelivery implements CredentialDeliveryAdapter {
       ({ role }) => role === "inference",
     )?.reference;
 
-    await writeFile(
-      join(context.targetState, ".aws", "config"),
-      buildCapsuleAwsConfig({
-        helperPath: context.helperPath,
-        operational,
-        inference,
-      }),
-      { encoding: "utf8", mode: 0o600 },
-    );
+    const configPath = join(context.targetState, ".aws", "config");
+    await mkdir(join(context.targetState, ".aws"), {
+      recursive: true,
+      mode: 0o700,
+    });
+
+    // Append. The target's imported cloud profile is staged into this file
+    // first, and overwriting it removed the very profile AWS_PROFILE names,
+    // leaving the capsule with no resolvable credentials at all.
+    const existing = await readFile(configPath, "utf8").catch(() => "");
+    const brokered = buildCapsuleAwsConfig({
+      helperPath: context.helperPath,
+      operational,
+      inference,
+    });
+    const separator = existing && !existing.endsWith("\n") ? "\n" : "";
+
+    await writeFile(configPath, `${existing}${separator}${brokered}`, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
 
   /**

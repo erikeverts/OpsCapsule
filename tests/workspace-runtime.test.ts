@@ -383,6 +383,7 @@ describe("brokered credentials in the launch path", () => {
   async function prepare(options: {
     withCredentials: boolean;
     kind?: "aws-profile" | "provider-oauth";
+    inferenceOnly?: boolean;
   }) {
     const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-broker-"));
     temporaryDirectories.push(baseDirectory);
@@ -424,7 +425,9 @@ describe("brokered credentials in the launch path", () => {
           },
         ];
         manifest.inferenceCredential = "central-inference";
-        manifest.targets[0]!.operationalCredential = "target-operational";
+        if (!options.inferenceOnly) {
+          manifest.targets[0]!.operationalCredential = "target-operational";
+        }
       }
     }
 
@@ -441,6 +444,48 @@ describe("brokered credentials in the launch path", () => {
     );
     return { runtime, resolved };
   }
+
+  it("keeps the target cloud profile when only an inference credential is brokered", async () => {
+    // Reproduces a real failure: brokering only a Bedrock inference identity
+    // overwrote the capsule's AWS config, removing the very profile
+    // AWS_PROFILE names, so the agent could load no credentials at all.
+    const { runtime, resolved } = await prepare({
+      withCredentials: true,
+      inferenceOnly: true,
+    });
+
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+
+    expect(awsConfig).toContain("[profile opscapsule-inference]");
+    // The target keeps its own operational profile: brokering inference alone
+    // must not repoint or remove the identity the capsule works with.
+    expect(environment.AWS_PROFILE).toBe("atlas-nonprod");
+    expect(environment.AWS_PROFILE).not.toBe("opscapsule-inference");
+    expect(environment.AWS_PROFILE).not.toBe("default");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
+
+  it("points the environment at the brokered operational profile", async () => {
+    const { runtime, resolved } = await prepare({ withCredentials: true });
+    const environment = buildWorkspaceEnvironment(runtime, resolved);
+    const awsConfig = await readFile(
+      join(runtime.targetState, ".aws", "config"),
+      "utf8",
+    );
+
+    // A brokered operational identity is written as the default profile, so
+    // the environment has to name it rather than the imported cloud profile.
+    expect(environment.AWS_PROFILE).toBe("default");
+    expect(awsConfig).toContain("[default]");
+    expect(awsConfig).toContain("target-operational");
+
+    await cleanupWorkspaceRuntime(runtime);
+  });
 
   it("gives a capsule no broker channel when its credentials are materialized", async () => {
     // A Copilot-backed capsule reads a file; nothing pulls, so it must not be

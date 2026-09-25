@@ -229,6 +229,48 @@ describe("capsule AWS configuration", () => {
   });
 });
 
+describe("AWS config assembly", () => {
+  it("appends brokered profiles instead of replacing the target's own", async () => {
+    const base = await temporaryRoot("oc-aws-append-");
+    const awsDir = join(base, ".aws");
+    await mkdir(awsDir, { recursive: true });
+    // The target's imported cloud profile, staged before delivery runs.
+    await writeFile(
+      join(awsDir, "config"),
+      "[profile ri-obs-use1-dev]\nregion = us-east-1\nsso_start_url = https://example\n",
+    );
+
+    await new AwsCredentialDelivery().prepare({
+      helperPath: "/session/broker",
+      targetState: base,
+      agentState: join(base, "agents"),
+      assignments: [{ role: "inference", reference: inference }],
+      readSecret: async () => "",
+    });
+
+    const written = await readFile(join(awsDir, "config"), "utf8");
+    // Overwriting here removed the profile AWS_PROFILE names, leaving the
+    // capsule unable to load any credentials at all.
+    expect(written).toContain("[profile ri-obs-use1-dev]");
+    expect(written).toContain("sso_start_url = https://example");
+    expect(written).toContain("[profile opscapsule-inference]");
+  });
+
+  it("creates the aws directory when the target has no cloud connection", async () => {
+    const base = await temporaryRoot("oc-aws-nocloud-");
+    await new AwsCredentialDelivery().prepare({
+      helperPath: "/session/broker",
+      targetState: base,
+      agentState: join(base, "agents"),
+      assignments: [{ role: "operational", reference: operational }],
+      readSecret: async () => "",
+    });
+    expect(await readFile(join(base, ".aws", "config"), "utf8")).toContain(
+      "[default]",
+    );
+  });
+});
+
 describe("isolation allowance", () => {
   const settingsFor = (brokerSocket?: string) =>
     buildSandboxRuntimeSettings({
