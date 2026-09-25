@@ -22,6 +22,10 @@ import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { writeBrokerHelper } from "./credentials/helper.js";
 import { CredentialDeliveryRegistry } from "./credentials/delivery/registry.js";
 import { OPERATIONAL_PROFILE_NAME } from "./credentials/delivery/aws.js";
+import {
+  applyInferenceConfiguration,
+  inferenceEnvironment,
+} from "./credentials/inference-configuration.js";
 import type { CredentialReference } from "../shared/credentials.js";
 import {
   extractKubeconfigContext,
@@ -195,6 +199,7 @@ async function prepareAgentState(
   agentState: string,
   resolvedTarget: ResolvedWorkspaceTarget,
   agentInstructions?: string,
+  brokerHelper?: string,
 ): Promise<void> {
   await assertStateDirectory(agentState);
   await Promise.all(
@@ -264,6 +269,19 @@ async function prepareAgentState(
     } else {
       await rm(destination, { force: true });
     }
+  }
+
+  // Written after managed configuration is copied, so the capsule's inference
+  // selection is merged into whatever the profile imported rather than being
+  // overwritten by it.
+  if (resolvedTarget.credentials.inference) {
+    await applyInferenceConfiguration({
+      home,
+      agentState,
+      adapter: profile.adapter,
+      reference: resolvedTarget.credentials.inference,
+      helperPath: brokerHelper,
+    });
   }
 }
 
@@ -391,7 +409,13 @@ export async function createWorkspaceRuntime(
     await writeBrokerHelper(brokerHelper, brokerSocket);
   }
   await prepareCloudState(home, targetState, resolvedTarget);
-  await prepareAgentState(home, agentState, resolvedTarget, agentInstructions);
+  await prepareAgentState(
+    home,
+    agentState,
+    resolvedTarget,
+    agentInstructions,
+    brokerHelper,
+  );
   if (assignments.length > 0) {
     await delivery.prepare({
       helperPath: brokerHelper,
@@ -510,6 +534,7 @@ export function buildWorkspaceEnvironment(
     ...cloudEnvironment,
     ...brokeredAwsPaths,
     ...brokeredAws,
+    ...inferenceEnvironment(resolvedTarget.credentials.inference),
     HOME: runtime.home,
     ZDOTDIR: runtime.home,
     XDG_CONFIG_HOME: join(runtime.home, ".config"),

@@ -393,6 +393,19 @@ describe("brokered credentials in the launch path", () => {
     const manifest = structuredClone(source.manifest);
     manifest.metadata = { id: "brokered", name: "Brokered" };
     manifest.targets = manifest.targets.slice(0, 1);
+    manifest.agentProfiles = [
+      {
+        id: "opencode",
+        name: "OpenCode",
+        adapter: "opencode",
+        runtime: { command: "opencode", args: [] },
+        configuration: { files: [] },
+        environment: {},
+      },
+    ];
+    manifest.defaultAgentProfile = "opencode";
+    delete manifest.targets[0]!.agentProfile;
+    delete manifest.targets[0]!.agentRuntime;
 
     if (options.withCredentials) {
       const kind = options.kind ?? "aws-profile";
@@ -459,6 +472,18 @@ describe("brokered credentials in the launch path", () => {
       "utf8",
     );
     const environment = buildWorkspaceEnvironment(runtime, resolved);
+
+    // The app selects the inference profile for the agent; the user never
+    // edits configuration inside the capsule.
+    const openCodeConfig = JSON.parse(
+      await readFile(
+        join(runtime.home, ".config", "opencode", "opencode.json"),
+        "utf8",
+      ),
+    );
+    expect(
+      openCodeConfig.provider["amazon-bedrock"].options.profile,
+    ).toBe("opscapsule-inference");
 
     expect(awsConfig).toContain("[profile opscapsule-inference]");
     // The target keeps its own operational profile: brokering inference alone

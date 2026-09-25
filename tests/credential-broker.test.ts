@@ -1,6 +1,6 @@
 import { execFile, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { connect } from "node:net";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
@@ -23,6 +23,10 @@ import {
   withoutRefreshTokens,
 } from "../src/main/credentials/delivery/provider-oauth.js";
 import { CredentialDeliveryRegistry } from "../src/main/credentials/delivery/registry.js";
+import {
+  applyInferenceConfiguration,
+  inferenceEnvironment,
+} from "../src/main/credentials/inference-configuration.js";
 import {
   CredentialNotStoredError,
   CredentialStorageUnavailableError,
@@ -852,5 +856,108 @@ describe("AWS profile credentials", () => {
       AccessKeyId: "AKIA",
       SecretAccessKey: "s",
     });
+  });
+});
+
+describe("inference configuration is written by the app", () => {
+  const awsInference = { ...inference, region: "us-east-1" };
+
+  it("selects the inference profile for OpenCode without the user editing anything", async () => {
+    const base = await temporaryRoot("oc-infer-opencode-");
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: awsInference,
+    });
+
+    const config = JSON.parse(
+      await readFile(join(base, ".config", "opencode", "opencode.json"), "utf8"),
+    );
+    // Without this OpenCode falls back to AWS_PROFILE and bills inference to
+    // the customer's operational account.
+    expect(config.provider["amazon-bedrock"].options).toEqual({
+      profile: "opscapsule-inference",
+      region: "us-east-1",
+    });
+  });
+
+  it("merges into imported managed configuration instead of replacing it", async () => {
+    const base = await temporaryRoot("oc-infer-merge-");
+    const path = join(base, ".config", "opencode", "opencode.json");
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(
+      path,
+      JSON.stringify({
+        model: "anthropic/claude-sonnet-4",
+        provider: { "amazon-bedrock": { options: { region: "eu-west-1" } } },
+      }),
+    );
+
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: awsInference,
+    });
+
+    const config = JSON.parse(await readFile(path, "utf8"));
+    expect(config.model).toBe("anthropic/claude-sonnet-4");
+    expect(config.provider["amazon-bedrock"].options.profile).toBe(
+      "opscapsule-inference",
+    );
+    // The credential's region wins, because it describes where that identity
+    // can actually invoke Bedrock.
+    expect(config.provider["amazon-bedrock"].options.region).toBe("us-east-1");
+  });
+
+  it("points Claude Code at the broker, which has no profile option", async () => {
+    const base = await temporaryRoot("oc-infer-claude-");
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "claude-code",
+      reference: awsInference,
+      helperPath: "/session/broker",
+    });
+
+    const settings = JSON.parse(
+      await readFile(
+        join(base, "agents", "data", "claude", "settings.json"),
+        "utf8",
+      ),
+    );
+    expect(settings.awsCredentialExport).toBe(
+      "/session/broker central-inference",
+    );
+    expect(settings.env.CLAUDE_CODE_USE_BEDROCK).toBe("1");
+  });
+
+  it("leaves a provider login alone, since it is delivered as a file", async () => {
+    const base = await temporaryRoot("oc-infer-oauth-");
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: {
+        id: "copilot",
+        name: "Copilot",
+        kind: "provider-oauth",
+        scope: "user",
+        providerId: "opencode",
+      },
+    });
+    await expect(
+      readFile(join(base, ".config", "opencode", "opencode.json"), "utf8"),
+    ).rejects.toMatchObject({ code: "ENOENT" });
+  });
+
+  it("never exposes a credential-minting command to the shell panes", () => {
+    const environment = inferenceEnvironment(awsInference);
+    expect(environment.OPSCAPSULE_INFERENCE_PROFILE).toBe(
+      "opscapsule-inference",
+    );
+    expect(JSON.stringify(environment)).not.toContain("broker");
+    expect(JSON.stringify(environment)).not.toContain(awsInference.id);
   });
 });

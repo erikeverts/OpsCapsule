@@ -147,19 +147,23 @@ pulls. With no credentials, or with only materialized ones,
 
 For AWS, the capsule gets two named profiles. The operational identity is the
 default profile and remains the value of `AWS_PROFILE`. The inference identity
-is named `opscapsule-inference` and is never the default and never named in the
-environment, because any `AWS_*` variable reaching the agent also reaches the
-operational commands it spawns. Selecting it is done in agent configuration:
+is named `opscapsule-inference`, is never the default, and is never named in
+the environment, because any `AWS_*` variable reaching the agent also reaches
+the operational commands it spawns.
 
-```json
-{
-  "provider": {
-    "amazon-bedrock": {
-      "options": { "profile": "opscapsule-inference", "region": "us-east-1" }
-    }
-  }
-}
-```
+**OpsCapsule selects the inference identity for the agent.** Configuring the
+workspace is enough; nothing needs editing inside the capsule.
+
+| Agent | What OpsCapsule writes |
+| --- | --- |
+| OpenCode | `provider."amazon-bedrock".options.profile` in `opencode.json` |
+| Claude Code | `awsCredentialExport` in `settings.json`, pointed at the broker |
+| Generic command | `OPSCAPSULE_INFERENCE_PROFILE` and `OPSCAPSULE_INFERENCE_REGION` |
+
+Imported managed configuration is merged, not replaced, so a profile can still
+bring its own settings. The environment deliberately carries only the profile
+name and region: it is shared with both shell panes, so it must not hand every
+shell a command that can spend the inference account.
 
 ## Verifying
 
