@@ -1,11 +1,13 @@
 import { execFile, spawnSync } from "node:child_process";
 import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { connect } from "node:net";
+import { request as httpRequest } from "node:http";
 import { promisify } from "node:util";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   assertUsableSocketPath,
+  BROKER_REFERENCE_HEADER,
+  BROKER_TOKEN_HEADER,
   CredentialBrokerSession,
   type BrokerAuditEvent,
 } from "../src/main/credentials/broker.js";
@@ -323,29 +325,41 @@ describe("broker session protocol", () => {
     }
   }
 
-  function request(socketPath: string, payload: string): Promise<string> {
+  function request(
+    socketPath: string,
+    headers: Record<string, string>,
+  ): Promise<{ status: number; body: string }> {
     return new Promise((resolve, reject) => {
-      const socket = connect(socketPath, () => socket.end(payload));
-      let response = "";
-      socket.on("data", (chunk) => {
-        response += chunk.toString();
-      });
-      socket.on("end", () => resolve(response));
-      socket.on("error", reject);
-      setTimeout(() => {
-        socket.destroy();
-        reject(new Error("timed out"));
-      }, 5_000);
+      const call = httpRequest(
+        { socketPath, path: "/credentials", method: "GET", headers },
+        (response) => {
+          let body = "";
+          response.on("data", (chunk) => {
+            body += chunk.toString();
+          });
+          response.on("end", () =>
+            resolve({ status: response.statusCode ?? 0, body }),
+          );
+        },
+      );
+      call.on("error", reject);
+      call.end();
     });
   }
+
+  const headersFor = (token: string, reference: string) => ({
+    [BROKER_TOKEN_HEADER]: token,
+    [BROKER_REFERENCE_HEADER]: reference,
+  });
 
   it("issues credentials for an in-scope reference and audits it", async () => {
     await withBroker(async (socketPath, audit) => {
       const response = await request(
         socketPath,
-        `${JSON.stringify({ token: "session-token", referenceId: "central-inference" })}\n`,
+        headersFor("session-token", "central-inference"),
       );
-      expect(JSON.parse(response)).toMatchObject({
+      expect(response.status).toBe(200);
+      expect(JSON.parse(response.body)).toMatchObject({
         Version: 1,
         AccessKeyId: "ASIAFROMMAINPROCESS",
       });
@@ -355,17 +369,44 @@ describe("broker session protocol", () => {
     });
   });
 
-  it("denies a wrong token, an unknown reference, and a malformed request alike", async () => {
+  it("waits for a slow issuer instead of dropping the response", async () => {
+    // The original nc transport exited on stdin EOF and discarded anything
+    // that had not already arrived, so every real AWS resolution was lost.
+    const base = await temporaryRoot("oc-broker-slow-");
+    const socketPath = join(base, "broker.sock");
+    const session = new CredentialBrokerSession({
+      socketPath,
+      token: "session-token",
+      references: [inference],
+      issue: async () => {
+        await new Promise((resolve) => setTimeout(resolve, 900));
+        return awsPayload;
+      },
+    });
+    await session.listen();
+    try {
+      const response = await request(
+        socketPath,
+        headersFor("session-token", "central-inference"),
+      );
+      expect(JSON.parse(response.body).AccessKeyId).toBe("ASIAFROMMAINPROCESS");
+    } finally {
+      await session.close();
+    }
+  });
+
+  it("denies a wrong token, an unknown reference, and a malformed one alike", async () => {
     await withBroker(async (socketPath, audit) => {
-      for (const payload of [
-        JSON.stringify({ token: "wrong", referenceId: "central-inference" }),
-        JSON.stringify({ token: "session-token", referenceId: "not-declared" }),
-        "{ not json",
+      for (const headers of [
+        headersFor("wrong", "central-inference"),
+        headersFor("session-token", "not-declared"),
+        headersFor("session-token", "Not A Reference"),
       ]) {
-        const response = await request(socketPath, `${payload}\n`);
+        const response = await request(socketPath, headers);
         // Identical response in every case: a capsule must not be able to
         // enumerate which references exist by comparing error messages.
-        expect(JSON.parse(response)).toEqual({
+        expect(response.status).toBe(403);
+        expect(JSON.parse(response.body)).toEqual({
           Error: "Credential request denied.",
         });
       }
@@ -374,28 +415,20 @@ describe("broker session protocol", () => {
       expect(audit.map((event) => event.reason)).toEqual([
         "invalid session token",
         "reference not in scope for this session",
-        "malformed request",
+        "malformed credential reference",
       ]);
     });
   });
 
-  it("refuses a request larger than the protocol allows", async () => {
+  it("ignores anything the capsule puts in the request body", async () => {
     await withBroker(async (socketPath) => {
-      // The broker destroys an oversize connection, so the client may well see
-      // EPIPE mid-write. Either way the requirement is the same: no credential
-      // is ever returned.
-      const response = await request(
-        socketPath,
-        `${JSON.stringify({
-          token: "session-token",
-          referenceId: "central-inference",
-          padding: "x".repeat(8192),
-        })}\n`,
-      ).catch((error: NodeJS.ErrnoException) => {
-        expect(["EPIPE", "ECONNRESET"]).toContain(error.code);
-        return "";
+      // The capsule may name a reference and nothing else; no body it sends is
+      // ever read, so it cannot influence what the broker does.
+      const response = await request(socketPath, {
+        ...headersFor("session-token", "central-inference"),
+        "content-length": "0",
       });
-      expect(response).not.toContain("ASIAFROMMAINPROCESS");
+      expect(response.status).toBe(200);
     });
   });
 
@@ -412,9 +445,9 @@ describe("broker session protocol", () => {
     session.revoke();
     const response = await request(
       socketPath,
-      `${JSON.stringify({ token: "session-token", referenceId: "central-inference" })}\n`,
+      headersFor("session-token", "central-inference"),
     );
-    expect(response).not.toContain("ASIAFROMMAINPROCESS");
+    expect(response.body).not.toContain("ASIAFROMMAINPROCESS");
     await session.close();
   });
 
@@ -486,8 +519,13 @@ describe.skipIf(!macOsSandboxAvailable)(
         socketPath,
         token,
         references: [operational, inference],
-        issue: async (reference) =>
-          new AwsCredentialDelivery().formatResponse(
+        issue: async (reference) => {
+          // Resolving a real AWS profile takes hundreds of milliseconds. The
+          // original nc transport dropped any response that was not already
+          // waiting, so the delay is part of what must be proven at the
+          // boundary, not just in isolation.
+          await new Promise((resolve) => setTimeout(resolve, 600));
+          return new AwsCredentialDelivery().formatResponse(
             JSON.stringify({
               ...issued,
               accessKeyId:
@@ -495,7 +533,8 @@ describe.skipIf(!macOsSandboxAvailable)(
                   ? "ASIAINFERENCE"
                   : "ASIAOPERATIONAL",
             }),
-          ),
+          );
+        },
       });
       await session.listen();
       await writeBrokerHelper(helperPath, socketPath);

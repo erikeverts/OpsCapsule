@@ -187,6 +187,6 @@ plaintext must not appear in the file.
   code or browser flow from the main process is a later slice.
 - Identity verification against `expectedAccountId` is not implemented, so the
   account shown in the UI is still a declared value rather than a verified one.
-- The broker transport depends on `nc` on macOS and `socat` on Linux. A missing
-  transport currently fails when a credential is requested rather than at
-  readiness.
+- The broker transport uses `curl --unix-socket`, which is present by default
+  on macOS and effectively every Linux distribution. A missing `curl` currently
+  fails when a credential is requested rather than at readiness.

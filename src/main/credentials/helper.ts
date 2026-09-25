@@ -1,6 +1,10 @@
 import { chmod, writeFile } from "node:fs/promises";
 import { randomBytes } from "node:crypto";
 import type { CredentialReference } from "../../shared/credentials.js";
+import {
+  BROKER_REFERENCE_HEADER,
+  BROKER_TOKEN_HEADER,
+} from "./broker.js";
 
 /**
  * The helper that AWS `credential_process` and Claude Code's
@@ -8,10 +12,14 @@ import type { CredentialReference } from "../../shared/credentials.js";
  *
  * It cannot be Node: the RunAsNode fuse is disabled (ADR 0006) and the helper
  * is spawned by the AWS client inside the sandbox, so it cannot be an Electron
- * utility process either. It is therefore a generated POSIX shell script using
- * a transport that is already present on each supported platform - `nc` is part
- * of the macOS base system, and `socat` is already a required Linux isolation
- * dependency.
+ * utility process either. It is therefore a generated POSIX shell script.
+ *
+ * The transport is `curl --unix-socket`. An earlier version used `nc`, which
+ * is quietly broken for this purpose: `nc` exits as soon as its stdin reaches
+ * EOF and discards a response that has not already arrived. Resolving a real
+ * AWS profile takes hundreds of milliseconds, so every genuine request was
+ * lost. `curl` waits for the response, is present by default on macOS and
+ * effectively every Linux distribution, and removes the per-platform split.
  *
  * The helper holds no credential. It relays a session token and a reference id
  * and writes back whatever the main process returns.
@@ -20,13 +28,6 @@ export const BROKER_TOKEN_VARIABLE = "OPSCAPSULE_BROKER_TOKEN";
 
 export function createBrokerToken(): string {
   return randomBytes(32).toString("base64url");
-}
-
-function transportCommand(socketPath: string): string {
-  if (process.platform === "linux") {
-    return `socat - "UNIX-CONNECT:${socketPath}"`;
-  }
-  return `/usr/bin/nc -U "${socketPath}"`;
 }
 
 export function buildBrokerHelperScript(socketPath: string): string {
@@ -46,10 +47,16 @@ export function buildBrokerHelperScript(socketPath: string): string {
     "  exit 77",
     "fi",
     "",
-    "# The token travels in the environment, never in argv, because argv is",
-    "# readable by other processes owned by the same user.",
-    `printf '{"token":"%s","referenceId":"%s"}\\n' "\${${BROKER_TOKEN_VARIABLE}}" "$1" \\`,
-    `  | ${transportCommand(socketPath)}`,
+    "# The token travels in a header sourced from the environment, never in",
+    "# argv, which other processes owned by the same user can read.",
+    "# --noproxy keeps the sandbox's own HTTP proxy settings out of a request",
+    "# that never leaves the machine.",
+    "exec /usr/bin/curl --silent --show-error --fail \\",
+    '  --noproxy "*" \\',
+    `  --unix-socket "${socketPath}" \\`,
+    `  --header "${BROKER_TOKEN_HEADER}: \${${BROKER_TOKEN_VARIABLE}}" \\`,
+    `  --header "${BROKER_REFERENCE_HEADER}: $1" \\`,
+    "  http://localhost/credentials",
     "",
   ].join("\n");
 }
