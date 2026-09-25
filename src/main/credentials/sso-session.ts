@@ -185,6 +185,15 @@ export function describeSsoSession(
   if (!state) {
     return undefined;
   }
+  // No countdown when the CLI renews by itself. Modern SSO access tokens last
+  // about an hour and are refreshed automatically, so a countdown would show
+  // an alarming number continuously for something that never needs action. The
+  // deadline that does matter is when the refresh registration lapses, which
+  // is months away and is reflected by canRenewSilently turning false.
+  if (state.canRenewSilently) {
+    return "Signed in";
+  }
+
   // Kept short: this sits in a narrow sidebar, not a settings page.
   const remainingMs = state.expiresAt.getTime() - now.getTime();
   if (remainingMs > 0) {
@@ -192,5 +201,5 @@ export function describeSsoSession(
     const minutes = Math.floor((remainingMs % 3_600_000) / 60_000);
     return hours > 0 ? `Signed in, ${hours}h left` : `Expires in ${minutes}m`;
   }
-  return state.canRenewSilently ? "Renews automatically" : "Sign-in expired";
+  return "Sign-in expired";
 }

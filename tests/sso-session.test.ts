@@ -67,6 +67,17 @@ describe("SSO session severity", () => {
     expect(ssoSessionSeverity(at(-1))).toBe("expired");
   });
 
+  it("shows no countdown for a session that renews itself", () => {
+    // Real AWS SSO access tokens last about an hour and refresh silently, so
+    // a remaining-time figure is noise rather than information.
+    expect(
+      describeSsoSession({
+        expiresAt: new Date(Date.now() + 29 * 60_000),
+        canRenewSilently: true,
+      }),
+    ).toBe("Signed in");
+  });
+
   it("stays quiet for a session that renews itself, however close to expiry", () => {
     // Colouring a session the CLI renews without the user would train people
     // to ignore the colour.
@@ -145,7 +156,8 @@ describe("SSO session expiry", () => {
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     // Warning here would be a false alarm: the CLI renews without the user.
     expect(state!.canRenewSilently).toBe(true);
-    expect(describeSsoSession(state)).toBe("Renews automatically");
+    // A countdown here would show an alarming number for a non-event.
+    expect(describeSsoSession(state)).toBe("Signed in");
   });
 
   it("reports an expired session whose registration has also lapsed", async () => {
