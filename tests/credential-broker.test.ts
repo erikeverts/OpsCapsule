@@ -702,6 +702,36 @@ describe("provider-agnostic delivery", () => {
     expect(registry.requiresBrokerChannel([copilot, inference])).toBe(true);
   });
 
+  it("keeps the refresh token for a provider that cannot work without it", async () => {
+    const base = await temporaryRoot("oc-oauth-copilot-");
+    const agentState = join(base, "agents", "opencode");
+    await mkdir(agentState, { recursive: true });
+    // OpenCode stores a Copilot login with expires: 0, meaning it mints a
+    // fresh Copilot API token from the refresh token on first use. Stripping
+    // it would deliver a credential that fails immediately.
+    const secret = JSON.stringify({
+      "github-copilot": {
+        type: "oauth",
+        access: "gho_access",
+        refresh: "ghu_refresh",
+        expires: 0,
+      },
+    });
+
+    await new ProviderOAuthDelivery().prepare({
+      targetState: join(base, "target"),
+      agentState,
+      assignments: [{ role: "inference", reference: copilot }],
+      readSecret: async () => secret,
+    });
+
+    const written = JSON.parse(
+      await readFile(join(agentState, "data", "opencode", "auth.json"), "utf8"),
+    );
+    expect(written["github-copilot"].refresh).toBe("ghu_refresh");
+    expect(written["github-copilot"].expires).toBe(0);
+  });
+
   it("materializes a provider login into agent state and removes it on teardown", async () => {
     const base = await temporaryRoot("oc-oauth-");
     const agentState = join(base, "agents", "opencode");
@@ -720,6 +750,7 @@ describe("provider-agnostic delivery", () => {
     expect(JSON.parse(await readFile(destination, "utf8"))).toEqual({
       github: { type: "oauth", access: "tok" },
     });
+    expect((await stat(destination)).mode & 0o777).toBe(0o600);
     expect((await stat(destination)).mode & 0o777).toBe(0o600);
 
     // The secret must not outlive the capsule.

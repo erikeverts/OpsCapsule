@@ -358,6 +358,13 @@ previously untested and are now regression-covered.
   That is a genuine weakening relative to the pull path and is accepted only
   because the consuming agents offer no alternative. Teardown removal is
   therefore load-bearing rather than tidiness.
+- Refresh-token retention is a per-provider policy, not a blanket rule.
+  OpenCode stores a GitHub Copilot login with a zero expiry and mints a Copilot
+  API token from the refresh token on demand, so removing it would deliver a
+  credential that fails on first use. For that provider the refresh token is
+  retained deliberately and the exposure is stated in the UI, rather than
+  either shipping a broken credential or silently weakening the rule
+  everywhere.
 - Issue #8, which asks the UI to distinguish configured from active isolation,
   now has a second dimension to report: whether a capsule has a broker channel
   open.

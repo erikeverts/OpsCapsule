@@ -2002,7 +2002,10 @@ export function WorkspaceEditor({
                       </Field>
 
                       {credential.kind === "provider-oauth" ? (
-                        <Field label="Provider">
+                        <Field
+                          label="Provider"
+                          hint="A provider login is written into the capsule for the session and removed on teardown, because the agent reads it from a file. An AWS session is never stored in the capsule at all."
+                        >
                           <input
                             placeholder="opencode"
                             value={credential.providerId ?? ""}

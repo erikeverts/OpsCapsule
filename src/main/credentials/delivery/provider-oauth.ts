@@ -21,29 +21,55 @@ import type {
  * written once per capsule rather than copied into a workspace resource
  * directory, and the real home directory is never exposed.
  */
-const providerDestinations: Record<string, (agentState: string) => string> = {
+interface ProviderDeliveryPolicy {
+  readonly destination: (agentState: string) => string;
+  /**
+   * Whether the consumer needs the refresh token to function.
+   *
+   * Stripping it is the safer default, but it is not always possible. OpenCode
+   * stores a GitHub Copilot login as `{access, refresh, expires: 0}`: the
+   * zero expiry means it treats the access token as stale and mints a fresh
+   * Copilot API token from the refresh token on demand. Removing it would
+   * deliver a credential that fails on first use, so for this provider the
+   * refresh token is retained and the weaker exposure is accepted explicitly
+   * rather than silently.
+   */
+  readonly retainsRefreshToken: boolean;
+}
+
+const providerPolicies: Record<string, ProviderDeliveryPolicy> = {
   // OpenCode resolves auth.json under XDG_DATA_HOME, which the OpenCode
   // adapter points at <agentState>/data.
-  opencode: (agentState) => join(agentState, "data", "opencode", "auth.json"),
+  opencode: {
+    destination: (agentState) =>
+      join(agentState, "data", "opencode", "auth.json"),
+    retainsRefreshToken: true,
+  },
 };
 
-function destinationFor(
+export function policyFor(
   reference: CredentialReference,
-  agentState: string,
-): string {
+): ProviderDeliveryPolicy {
   const providerId = reference.providerId;
   if (!providerId) {
     throw new Error(
       `Credential reference '${reference.id}' needs a providerId to be delivered.`,
     );
   }
-  const resolve = providerDestinations[providerId];
-  if (!resolve) {
+  const policy = providerPolicies[providerId];
+  if (!policy) {
     throw new Error(
       `No credential delivery is implemented for provider '${providerId}'.`,
     );
   }
-  return resolve(agentState);
+  return policy;
+}
+
+function destinationFor(
+  reference: CredentialReference,
+  agentState: string,
+): string {
+  return policyFor(reference).destination(agentState);
 }
 
 /**
@@ -82,13 +108,15 @@ export class ProviderOAuthDelivery implements CredentialDeliveryAdapter {
 
   async prepare(context: DeliveryContext): Promise<void> {
     for (const { reference } of context.assignments) {
+      const policy = policyFor(reference);
       const destination = destinationFor(reference, context.agentState);
       const secret = await context.readSecret(reference);
       await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
-      await writeFile(destination, withoutRefreshTokens(secret), {
-        encoding: "utf8",
-        mode: 0o600,
-      });
+      await writeFile(
+        destination,
+        policy.retainsRefreshToken ? secret : withoutRefreshTokens(secret),
+        { encoding: "utf8", mode: 0o600 },
+      );
     }
   }
 

@@ -60,14 +60,31 @@ call.
 There is no file to choose and no secret to paste. If you expected a file
 picker here, that was an earlier design and it was wrong.
 
-### Adding a provider login
+### Adding a provider login, such as GitHub Copilot
 
-1. **Add credential**, set kind to **Provider login**, and set the provider,
-   for example `opencode`.
-2. Choose **Import credential** and select the file, for example
-   `~/.local/share/opencode/auth.json` after running `opencode auth login` once
-   on the host.
-3. Select it as the workspace **inference identity**.
+1. Authenticate once on the host: run `opencode` and `/connect`, then choose
+   GitHub Copilot and complete the device flow.
+2. **Add credential**, set kind to **Provider login**, and set the provider to
+   `opencode`.
+3. Choose **Import credential** and select
+   `~/.local/share/opencode/auth.json`.
+4. Select it as the workspace **inference identity**.
+5. Choose a Copilot model in the profile's `opencode.json`, for example
+   `"model": "github-copilot/gpt-5"`. The credential supplies authentication;
+   which model to use is ordinary agent configuration.
+
+The login is written into the capsule's agent state at launch and removed on
+teardown. Unlike an AWS session, it is briefly at rest inside the capsule,
+because the agent reads it from a file and there is nothing to call.
+
+OpenCode stores a Copilot login with a zero expiry and mints a Copilot API
+token from its refresh token on demand, so that refresh token is delivered with
+it. Removing it would hand the capsule a credential that fails on first use.
+
+**Claude Code cannot use GitHub Copilot.** Its model backends are the Anthropic
+API, Amazon Bedrock, Claude Platform on AWS, Google Cloud's Agent Platform,
+Microsoft Foundry, Mantle, and Anthropic-compatible gateways. Use Bedrock for a
+Claude Code inference identity.
 
 **Sign out** removes a stored secret and keeps the reference. It is only shown
 for credentials that store one.
