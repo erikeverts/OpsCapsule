@@ -358,6 +358,11 @@ previously untested and are now regression-covered.
   That is a genuine weakening relative to the pull path and is accepted only
   because the consuming agents offer no alternative. Teardown removal is
   therefore load-bearing rather than tidiness.
+- A materialized provider login may not expire at all. A GitHub Copilot login
+  is a pair of GitHub OAuth App user tokens with no default expiry, so unlike a
+  brokered AWS session it does not become harmless with time. Teardown removal
+  is the only thing limiting its exposure, which raises the cost of failing to
+  remove it.
 - Refresh-token retention is a per-provider policy, not a blanket rule.
   OpenCode stores a GitHub Copilot login with a zero expiry and mints a Copilot
   API token from the refresh token on demand, so removing it would deliver a
