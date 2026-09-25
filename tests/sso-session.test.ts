@@ -145,7 +145,7 @@ describe("SSO session expiry", () => {
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     // Warning here would be a false alarm: the CLI renews without the user.
     expect(state!.canRenewSilently).toBe(true);
-    expect(describeSsoSession(state)).toMatch(/renews automatically/);
+    expect(describeSsoSession(state)).toBe("Renews automatically");
   });
 
   it("reports an expired session whose registration has also lapsed", async () => {
@@ -163,7 +163,7 @@ describe("SSO session expiry", () => {
     });
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     expect(state!.canRenewSilently).toBe(false);
-    expect(describeSsoSession(state)).toMatch(/Sign in again/);
+    expect(describeSsoSession(state)).toBe("Sign-in expired");
   });
 
   it("supports a legacy profile that names the start URL directly", async () => {

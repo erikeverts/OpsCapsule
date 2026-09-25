@@ -1,5 +1,19 @@
 import type { CredentialStatus } from "../../../shared/credentials";
 
+/**
+ * The sidebar offers an action only when there is something to do. A healthy
+ * identity needs nothing, and a button that is almost always a no-op teaches
+ * people to ignore it. Replacing a working credential stays in Workspace
+ * Studio, where it is a deliberate act rather than a glance.
+ */
+function needsAction(credential: CredentialStatus): boolean {
+  return (
+    !credential.authenticated ||
+    credential.severity === "expiring" ||
+    credential.severity === "expired"
+  );
+}
+
 interface CredentialSidebarProps {
   user: CredentialStatus[];
   workspace: CredentialStatus[];
@@ -65,18 +79,20 @@ export function CredentialSidebar({
                       </span>
                     ) : null}
                   </div>
-                  <button
-                    className="text-button"
-                    disabled={disabled || busyId === credential.id}
-                    onClick={() => onAction(credential)}
-                    type="button"
-                  >
-                    {busyId === credential.id
-                      ? "Working…"
-                      : credential.kind === "aws-profile"
-                        ? "Sign in"
-                        : "Re-import"}
-                  </button>
+                  {needsAction(credential) ? (
+                    <button
+                      className="text-button"
+                      disabled={disabled || busyId === credential.id}
+                      onClick={() => onAction(credential)}
+                      type="button"
+                    >
+                      {busyId === credential.id
+                        ? "Working…"
+                        : credential.kind === "aws-profile"
+                          ? "Sign in"
+                          : "Import"}
+                    </button>
+                  ) : null}
                 </div>
               </li>
             ))}

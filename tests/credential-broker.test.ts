@@ -858,7 +858,7 @@ describe("credential service", () => {
     ]);
     // An AWS credential naming no profile must say so rather than look merely
     // unauthenticated, which would suggest importing something.
-    expect(statuses[1]!.detail).toMatch(/No profile selected/);
+    expect(statuses[1]!.detail).toBe("No profile selected");
     // The renderer contract must never carry credential material.
     expect(JSON.stringify(statuses)).not.toContain("super-secret");
   });
@@ -1253,5 +1253,34 @@ describe("acting on a user credential from another workspace", () => {
     // Without this the action resolves against the selected workspace and
     // fails with "not saved in workspace borealis".
     expect(overview.user[0]!.workspaceId).toBe("ri-observability");
+  });
+});
+
+describe("sidebar copy stays short", () => {
+  it("keeps every status detail glanceable", async () => {
+    const manifest = {
+      metadata: { id: "atlas", name: "Atlas" },
+      credentials: [
+        { id: "copilot", name: "Copilot", kind: "provider-oauth", scope: "user", providerId: "opencode" },
+        { id: "no-profile", name: "No profile", kind: "aws-profile", scope: "user" },
+        { id: "missing", name: "Missing", kind: "aws-profile", scope: "user", sourceProfile: "not-a-real-profile" },
+      ],
+      targets: [],
+    } as unknown as Parameters<typeof credentialStatuses>[1];
+
+    const statuses = await credentialStatuses(
+      new CredentialStore("/unused", fakeEncryptor()),
+      manifest,
+    );
+    for (const status of statuses) {
+      // The sidebar column is narrow; long sentences wrap and look broken.
+      expect(status.detail!.length).toBeLessThanOrEqual(24);
+      expect(status.detail).not.toMatch(/\.$/);
+    }
+    expect(statuses.map((entry) => entry.detail)).toEqual([
+      "Not imported",
+      "No profile selected",
+      "Profile not found",
+    ]);
   });
 });

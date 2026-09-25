@@ -70,7 +70,7 @@ export async function credentialStatus(
   if (reference.kind === "aws-profile") {
     const profile = reference.sourceProfile;
     if (!profile) {
-      return { ...base, authenticated: false, detail: "No profile selected." };
+      return { ...base, authenticated: false, detail: "No profile selected" };
     }
     // Status is a file read. Resolving the profile is authoritative but costs
     // a subprocess, which is too expensive to show repeatedly in a list.
@@ -93,9 +93,7 @@ export async function credentialStatus(
     return {
       ...base,
       authenticated: exists,
-      detail: exists
-        ? "Credentials are read from this profile when a capsule asks."
-        : `Profile '${profile}' was not found on this host.`,
+      detail: exists ? "Profile ready" : "Profile not found",
       ...(exists ? {} : { severity: "expired" as const }),
     };
   }
@@ -107,9 +105,7 @@ export async function credentialStatus(
   return {
     ...base,
     authenticated: stored,
-    detail: stored
-      ? "Imported and held in the operating system keychain."
-      : "Not imported yet.",
+    detail: stored ? "Imported into keychain" : "Not imported",
   };
 }
 
