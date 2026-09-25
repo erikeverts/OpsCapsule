@@ -290,6 +290,11 @@ export const credentialImportInput = z.object({
   secret: z.string().min(1).max(200_000).optional(),
 });
 
+export const credentialOverviewInput = z.object({
+  workspaceId: z.string().min(1).optional(),
+  targetId: z.string().min(1).optional(),
+});
+
 export const credentialAuthenticateInput = z.object({
   workspaceId: z.string().min(1),
   referenceId: z.string().min(1),
@@ -320,6 +325,18 @@ export interface OpsCapsuleApi {
   discoverLocalResources(): Promise<LocalResourceOptions>;
   /** Authentication status for every credential the workspace declares. */
   credentialStatus(workspaceId: string): Promise<CredentialStatus[]>;
+  /**
+   * Credentials grouped by sharing scope, for the sidebar. User-scoped
+   * entries are global and do not change with selection.
+   */
+  credentialOverview(input: {
+    workspaceId?: string;
+    targetId?: string;
+  }): Promise<{
+    user: CredentialStatus[];
+    workspace: CredentialStatus[];
+    target: CredentialStatus[];
+  }>;
   /**
    * Stores a secret for a declared reference. Either a file the user picked or
    * a pasted value; the secret itself never travels back to the renderer.

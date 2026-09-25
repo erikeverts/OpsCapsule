@@ -61,4 +61,14 @@ export interface CredentialStatus {
   readonly expectedAccountId?: string;
   /** For aws-profile references: the host profile credentials come from. */
   readonly sourceProfile?: string;
+  /** Human-readable state, such as when a sign-in expires. */
+  readonly detail?: string;
+  /**
+   * The workspace whose manifest declares this reference. A user-scoped
+   * credential is global but is still declared somewhere, and actions resolve
+   * against the declaring workspace rather than whatever is selected.
+   */
+  readonly workspaceId?: string;
+  /** How prominently the state should be shown. Absent when nothing to say. */
+  readonly severity?: "ok" | "expiring" | "expired";
 }

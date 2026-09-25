@@ -10,6 +10,7 @@ export const IPC = {
   discoverLocalResources: "workspace:discover-local-resources",
   checkTargetReadiness: "workspace:check-target-readiness",
   credentialStatus: "credential:status",
+  credentialOverview: "credential:overview",
   credentialImport: "credential:import",
   credentialForget: "credential:forget",
   credentialAuthenticate: "credential:authenticate",
