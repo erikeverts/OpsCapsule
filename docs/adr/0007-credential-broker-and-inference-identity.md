@@ -265,12 +265,30 @@ without that distinction would be actively misleading.
 ### Authentication lifecycle
 
 Agent profiles gain an explicit authentication status and login and logout
-actions, replacing the argument-rewriting workaround. Login runs the provider's
-own flow inside the capsule boundary, at the chosen scope. Logout removes the
-stored secret for that reference. Revocation of an inference identity has no
-effect on the target connection, and revocation of a target connection has no
-effect on an inference identity; the two lifecycles are independent by
-construction.
+actions, replacing the argument-rewriting workaround.
+
+**Login runs in the main process, never inside a capsule.** The main process
+opens the provider's own flow - a browser redirect or a device code - receives
+the result, and writes it to the credential store at the chosen scope. Three
+reasons make this the only coherent option:
+
+- a capsule must never hold a long-lived secret, and the artefact a login
+  produces, such as an OAuth refresh token, is exactly that;
+- a capsule is bound to one target, so a login performed inside one could not
+  produce a `user`-scoped credential reusable everywhere, which is the original
+  complaint in issue #6; and
+- revocation and rotation have to be controllable from outside the boundary.
+
+What reaches a capsule is therefore always the shortest-lived artefact that
+works. For pull delivery that is a brokered session. For materialize delivery
+it is a short-lived access token written at launch, while the refresh token
+stays in the main process and is used there to renew it. A capsule never sees
+the refresh token.
+
+Logout removes the stored secret for that reference. Revocation of an inference
+identity has no effect on the target connection, and revocation of a target
+connection has no effect on an inference identity; the two lifecycles are
+independent by construction.
 
 ## Spike
 
@@ -332,6 +350,10 @@ previously untested and are now regression-covered.
   makes the broker socket a new untrusted input boundary requiring the same
   scrutiny as renderer IPC. Capsules with no pull-based credential are
   unaffected.
+- A materialize-delivered credential should be a short-lived access token
+  rather than the refresh token, so renewal has to run in the main process and
+  re-materialize on expiry. A capsule that outlives the access token needs the
+  file refreshed underneath it.
 - Materialized provider credentials are briefly at rest inside the capsule.
   That is a genuine weakening relative to the pull path and is accepted only
   because the consuming agents offer no alternative. Teardown removal is
