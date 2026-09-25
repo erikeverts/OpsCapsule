@@ -69,9 +69,13 @@ picker here, that was an earlier design and it was wrong.
    read from the agent's own credential store on this host.
 3. **Save changes**, then choose **Import login**.
 4. Select it as the workspace **inference identity**.
-5. Optionally set **Model** on the credential, for example
-   `github-copilot/gpt-5`, to pin which model the agent uses with this
-   identity.
+5. Set **Model** on the credential, for example `github-copilot/gpt-5`.
+
+   This matters more than it looks. A capsule normally has working AWS
+   credentials for operational work, and an agent with no model pinned will
+   detect them and start on Bedrock instead of the identity you selected. That
+   silent fallback is the problem this feature exists to prevent, and pinning a
+   model is what makes the choice deterministic.
 
 Switching the inference identity away from AWS also removes any Bedrock
 provider block from the capsule's agent configuration. Imported configuration

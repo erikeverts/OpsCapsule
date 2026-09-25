@@ -2073,7 +2073,12 @@ export function WorkspaceEditor({
 
                       <Field
                         label="Model"
-                        hint="Optional. Sets the model the agent uses with this identity, so starting a target needs no further configuration."
+                        hint={
+                          draft.inferenceCredential === credential.id &&
+                          !credential.model
+                            ? "Set a model. Without one the agent picks a provider itself, and a target with working AWS credentials will fall back to Bedrock rather than using this identity."
+                            : "Sets the model the agent uses with this identity, so starting a target needs no further configuration."
+                        }
                       >
                         <input
                           placeholder={
