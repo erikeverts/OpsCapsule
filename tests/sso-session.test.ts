@@ -80,7 +80,6 @@ describe("SSO session severity", () => {
     const state = {
       expiresAt: new Date(Date.now() + 6 * 3_600_000),
       canRenewSilently: true,
-      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
     expect(describeSsoSession(state)).toBe("Signed in, 6h left");
     expect(ssoSessionSeverity(state)).toBe("ok");
@@ -90,7 +89,6 @@ describe("SSO session severity", () => {
     const state = {
       expiresAt: new Date(Date.now() + 10 * 60_000),
       canRenewSilently: true,
-      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
     expect(ssoSessionSeverity(state)).toBe("expiring");
     expect(describeSsoSession(state)).toBe("Expires in 10m");
@@ -100,7 +98,6 @@ describe("SSO session severity", () => {
     const renewable = {
       expiresAt: new Date(Date.now() - 60_000),
       canRenewSilently: true,
-      renewableUntil: new Date(Date.now() + 59 * 86_400_000),
     };
     expect(ssoSessionSeverity(renewable)).toBe("expired");
     // Honest about the uncertainty: it may renew, and if it does the next
@@ -161,23 +158,6 @@ describe("SSO session expiry", () => {
     });
     const state = await readSsoSessionState("ri-obs-use1-dev", paths);
     expect(state!.expiresAt.toISOString()).toBe(inOneHour);
-  });
-
-  it("carries the registration deadline so renewal loss can be anticipated", async () => {
-    const paths = await fixture({
-      config: sessionConfig,
-      tokens: [
-        {
-          accessToken: "a",
-          refreshToken: "r",
-          startUrl: "https://hsp.awsapps.com/start/#/",
-          expiresAt: inOneHour,
-          registrationExpiresAt: nextYear,
-        },
-      ],
-    });
-    const state = await readSsoSessionState("ri-obs-use1-dev", paths);
-    expect(state!.renewableUntil?.toISOString()).toBe(nextYear);
   });
 
   it("still records whether a refresh token is present", async () => {

@@ -28,12 +28,6 @@ export interface SsoSessionState {
    * a usable refresh token is not something to warn about.
    */
   readonly canRenewSilently: boolean;
-  /**
-   * When the client registration lapses. An upper bound only: it does not say
-   * how long the user stays signed in, which is the Identity Center session
-   * duration and is not present in the cache.
-   */
-  readonly renewableUntil?: Date;
 }
 
 /**
@@ -153,13 +147,12 @@ export async function readSsoSessionState(
 
     // Several stale entries exist per start URL; the newest one is in use.
     if (!best || expiresAt.getTime() > best.expiresAt.getTime()) {
-      best = {
-        expiresAt,
-        canRenewSilently,
-        ...(canRenewSilently && registrationExpiresAt
-          ? { renewableUntil: registrationExpiresAt }
-          : {}),
-      };
+      // registrationExpiresAt is deliberately not carried forward. It is the
+      // client registration, roughly ninety days, and reads like a sign-in
+      // deadline while being nothing of the sort: how long a user stays signed
+      // in is the Identity Center session duration, which the cache never
+      // records. Keeping the value around invites that mistake again.
+      best = { expiresAt, canRenewSilently };
     }
   }
 
