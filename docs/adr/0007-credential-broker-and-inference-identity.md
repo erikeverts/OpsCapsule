@@ -1,8 +1,8 @@
 # ADR 0007: Credential broker and inference identity
 
-- Status: Proposed
+- Status: Experimental
 - Date: 2026-09-23
-- Spike: `src/main/credentials/`, `tests/credential-broker-spike.test.ts`
+- Implementation: `src/main/credentials/`, `tests/credential-broker.test.ts`
 
 ## Context
 
@@ -248,7 +248,7 @@ the consuming agents impose:
 
 ### Verification and display
 
-The broker gains an `identity` readiness check — the first AWS API call in the
+**Not yet implemented.** The broker is to gain an `identity` readiness check — the first AWS API call in the
 project. It resolves each configured identity and compares the returned account
 against `expectedIdentity.accountId`. A mismatch fails the check and blocks
 launch; an unverifiable identity is a warning, because an offline host is not
@@ -292,9 +292,9 @@ independent by construction.
 
 ## Spike
 
-A spike accompanies this ADR in `src/main/credentials/` with its proof in
-`tests/credential-broker-spike.test.ts`. It is deliberately not wired into the
-launch path. What it establishes:
+The spike that preceded the implementation is now part of it, in
+`src/main/credentials/` with its proof in `tests/credential-broker.test.ts`.
+What it established:
 
 - **The main process is the only credential holder, and the capsule can reach
   it.** With the settings OpsCapsule ships today the helper is *blocked*: there
@@ -309,7 +309,7 @@ launch path. What it establishes:
 - **The environment never names the inference identity**, which is the
   invariant that keeps operational commands on the target identity.
 
-The spike also closed a bypass that the existing design did not cover. The
+It also closed a bypass that the existing design did not cover. The
 manifest schema rejects `AWS_*` names in `profile.environment`, but a managed
 Claude Code `settings.json` carries its own `env` block and
 `.claude/settings.json` is an allowed managed destination. An `AWS_PROFILE`
