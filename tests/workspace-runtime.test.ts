@@ -542,6 +542,12 @@ describe("brokered credentials in the launch path", () => {
     // failed at listen() with EINVAL, so it must live in the short temp path.
     expect(runtime.brokerSocket!.startsWith(runtime.temp)).toBe(true);
     expect(Buffer.byteLength(runtime.brokerSocket!) + 1).toBeLessThanOrEqual(104);
+
+    // credential_process and awsCredentialExport are parsed as command lines,
+    // so a helper path containing a space is split and never found. The real
+    // userData path, "~/Library/Application Support/...", always contains one.
+    expect(runtime.brokerHelper!).not.toMatch(/\s/);
+    expect(runtime.brokerHelper!.startsWith(runtime.temp)).toBe(true);
     expect(resolved.credentials.operational?.id).toBe("target-operational");
     expect(resolved.credentials.inference?.id).toBe("central-inference");
 

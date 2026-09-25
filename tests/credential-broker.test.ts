@@ -950,6 +950,39 @@ describe("inference configuration is written by the app", () => {
     expect(config.provider["amazon-bedrock"].options.region).toBe("us-east-1");
   });
 
+  it("repoints a host profile pinned in imported configuration", async () => {
+    const base = await temporaryRoot("oc-infer-stale-");
+    const path = join(base, ".config", "opencode", "opencode.json");
+    await mkdir(dirname(path), { recursive: true });
+    // Imported config commonly pins a profile that exists on the host but not
+    // inside the capsule, and OpenCode has been seen using the underscore
+    // spelling. Leaving either in place leaves the agent unresolvable.
+    await writeFile(
+      path,
+      JSON.stringify({
+        provider: {
+          amazon_bedrock: { options: { profile: "claude-code", region: "us-east-1" } },
+        },
+      }),
+    );
+
+    await applyInferenceConfiguration({
+      home: base,
+      agentState: join(base, "agents"),
+      adapter: "opencode",
+      reference: awsInference,
+    });
+
+    const config = JSON.parse(await readFile(path, "utf8"));
+    expect(config.provider.amazon_bedrock.options.profile).toBe(
+      "opscapsule-inference",
+    );
+    expect(config.provider["amazon-bedrock"].options.profile).toBe(
+      "opscapsule-inference",
+    );
+    expect(JSON.stringify(config)).not.toContain("claude-code");
+  });
+
   it("points Claude Code at the broker, which has no profile option", async () => {
     const base = await temporaryRoot("oc-infer-claude-");
     await applyInferenceConfiguration({

@@ -79,11 +79,20 @@ export async function applyInferenceConfiguration(
       join(context.home, ".config", "opencode", "opencode.json"),
       (document) => {
         const provider = section(document, "provider");
-        const bedrock = section(provider, "amazon-bedrock");
-        const options = section(bedrock, "options");
-        options.profile = INFERENCE_PROFILE_NAME;
-        if (context.reference.region) {
-          options.region = context.reference.region;
+        // Imported configuration often pins a host profile name, which does
+        // not exist inside the capsule. Every Bedrock provider key present is
+        // repointed, not just the canonical one, so a stale entry cannot win
+        // and leave the agent with an unresolvable profile.
+        const keys = new Set(
+          Object.keys(provider).filter((key) => /^amazon[-_]bedrock$/.test(key)),
+        );
+        keys.add("amazon-bedrock");
+        for (const key of keys) {
+          const options = section(section(provider, key), "options");
+          options.profile = INFERENCE_PROFILE_NAME;
+          if (context.reference.region) {
+            options.region = context.reference.region;
+          }
         }
       },
     );

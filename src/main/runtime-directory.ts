@@ -390,7 +390,11 @@ export async function createWorkspaceRuntime(
   // "<userData>/sessions/<uuid>/broker.sock" already exceeds that under the
   // real Application Support path, which fails at listen() with EINVAL.
   const brokerSocket = needsBrokerChannel ? join(temp, "broker.sock") : undefined;
-  const brokerHelper = needsBrokerChannel ? join(root, "broker") : undefined;
+  // The helper also lives in the temp path. credential_process and
+  // awsCredentialExport are parsed as command lines, so a path containing
+  // spaces - which "~/Library/Application Support" always does - is split and
+  // the command is never found.
+  const brokerHelper = needsBrokerChannel ? join(temp, "broker") : undefined;
 
   await Promise.all([
     mkdir(home, { recursive: true, mode: 0o700 }),
