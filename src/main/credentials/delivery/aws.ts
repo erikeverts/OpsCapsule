@@ -51,14 +51,15 @@ export class AwsCredentialDelivery implements CredentialDeliveryAdapter {
    */
   formatResponse(secret: string): string {
     const parsed = JSON.parse(secret) as Record<string, string>;
-    if (!parsed.accessKeyId || !parsed.secretAccessKey || !parsed.sessionToken) {
+    if (!parsed.accessKeyId || !parsed.secretAccessKey) {
       throw new Error("Stored AWS credential is missing required fields.");
     }
     return `${JSON.stringify({
       Version: 1,
       AccessKeyId: parsed.accessKeyId,
       SecretAccessKey: parsed.secretAccessKey,
-      SessionToken: parsed.sessionToken,
+      // Static credentials legitimately have no session token.
+      ...(parsed.sessionToken ? { SessionToken: parsed.sessionToken } : {}),
       ...(parsed.expiration ? { Expiration: parsed.expiration } : {}),
     })}\n`;
   }

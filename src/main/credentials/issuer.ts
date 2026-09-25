@@ -1,3 +1,4 @@
+import { exportProfileCredentials } from "./aws-profile.js";
 import type { CredentialIssuer } from "./broker.js";
 import { CredentialDeliveryRegistry } from "./delivery/registry.js";
 import {
@@ -24,6 +25,16 @@ export function createCredentialIssuer(
   delivery = new CredentialDeliveryRegistry(),
 ): CredentialIssuer {
   return async (reference) => {
+    if (reference.kind === "aws-profile") {
+      // No secret is stored for a profile. Credentials are minted here, in the
+      // main process, so the SSO cache and role chain stay out of the capsule.
+      if (!reference.sourceProfile) {
+        throw new Error(
+          `Credential reference '${reference.id}' does not name an AWS profile.`,
+        );
+      }
+      return exportProfileCredentials(reference.sourceProfile);
+    }
     if (reference.kind === "aws-role") {
       throw new Error(
         `Credential reference '${reference.id}' requires STS role assumption, which is not implemented yet.`,

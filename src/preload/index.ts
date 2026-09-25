@@ -30,6 +30,8 @@ const api: OpsCapsuleApi = {
   credentialStatus: (workspaceId) =>
     ipcRenderer.invoke(IPC.credentialStatus, { workspaceId }),
   importCredential: (input) => ipcRenderer.invoke(IPC.credentialImport, input),
+  authenticateCredential: (input) =>
+    ipcRenderer.invoke(IPC.credentialAuthenticate, input),
   forgetCredential: (input) => ipcRenderer.invoke(IPC.credentialForget, input),
   checkTargetReadiness: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.checkTargetReadiness, { workspaceId, targetId }),

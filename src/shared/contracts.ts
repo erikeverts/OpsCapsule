@@ -281,6 +281,11 @@ export const credentialImportInput = z.object({
   secret: z.string().min(1).max(200_000).optional(),
 });
 
+export const credentialAuthenticateInput = z.object({
+  workspaceId: z.string().min(1),
+  referenceId: z.string().min(1),
+});
+
 export const credentialForgetInput = z.object({
   workspaceId: z.string().min(1),
   referenceId: z.string().min(1),
@@ -316,6 +321,14 @@ export interface OpsCapsuleApi {
     targetId?: string;
     sourcePath?: string;
     secret?: string;
+  }): Promise<CredentialStatus[]>;
+  /**
+   * Runs the provider's interactive sign-in in the main process. Used by
+   * AWS profiles, whose credentials are never stored by OpsCapsule.
+   */
+  authenticateCredential(input: {
+    workspaceId: string;
+    referenceId: string;
   }): Promise<CredentialStatus[]>;
   /** Sign out. Removes the stored secret, keeping the reference. */
   forgetCredential(input: {

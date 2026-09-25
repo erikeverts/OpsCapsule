@@ -36,6 +36,12 @@ import {
   wrapSandboxedLaunch,
 } from "../src/main/isolation/sandbox-command.js";
 import {
+  AwsProfileError,
+  exportProfileCredentials,
+  profileResolves,
+} from "../src/main/credentials/aws-profile.js";
+import { createCredentialIssuer } from "../src/main/credentials/issuer.js";
+import {
   assertUsableSecret,
   credentialStatuses,
   requireReference,
@@ -744,5 +750,46 @@ describe("credential service", () => {
     const oauth = manifest.credentials[0]!;
     expect(() => assertUsableSecret(oauth, "not json")).toThrow(/valid JSON/);
     expect(() => assertUsableSecret(oauth, "{}")).not.toThrow();
+  });
+});
+
+describe("AWS profile credentials", () => {
+  it("fails closed for a profile that cannot produce credentials", async () => {
+    // Environment-independent: whether the AWS CLI is absent or the profile is
+    // unknown, the result must be a clear refusal rather than a credential.
+    await expect(
+      exportProfileCredentials("opscapsule-does-not-exist"),
+    ).rejects.toBeInstanceOf(AwsProfileError);
+    expect(await profileResolves("opscapsule-does-not-exist")).toBe(false);
+  });
+
+  it("refuses an aws-profile reference that names no profile", async () => {
+    const issue = createCredentialIssuer(
+      new CredentialStore("/unused", fakeEncryptor()),
+      { workspaceId: "ws", targetId: "t" },
+    );
+    await expect(
+      issue({
+        id: "no-profile",
+        name: "No profile",
+        kind: "aws-profile",
+        scope: "user",
+      }),
+    ).rejects.toThrow(/does not name an AWS profile/);
+  });
+
+  it("treats a static profile without a session token as valid", () => {
+    // Long-lived IAM user credentials have no SessionToken; rejecting them
+    // would make perfectly normal profiles look broken.
+    const payload = JSON.parse(
+      awsDelivery.formatResponse(
+        JSON.stringify({ accessKeyId: "AKIA", secretAccessKey: "s" }),
+      ),
+    );
+    expect(payload).toEqual({
+      Version: 1,
+      AccessKeyId: "AKIA",
+      SecretAccessKey: "s",
+    });
   });
 });

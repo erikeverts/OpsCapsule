@@ -1996,7 +1996,36 @@ export function WorkspaceEditor({
                             }
                           />
                         </Field>
-                      ) : (
+                      ) : null}
+
+                      {credential.kind === "aws-profile" ? (
+                        <Field
+                          label="AWS profile"
+                          hint="Credentials are read from this profile when a capsule asks. OpsCapsule never stores them."
+                        >
+                          <select
+                            value={credential.sourceProfile ?? ""}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                next.credentials[index]!.sourceProfile =
+                                  event.target.value || undefined;
+                              })
+                            }
+                          >
+                            <option value="">Select a profile…</option>
+                            {localResources.awsProfiles.map((profile) => (
+                              <option key={profile.name} value={profile.name}>
+                                {profile.name}
+                                {profile.accountId
+                                  ? ` · ${profile.accountId}`
+                                  : ""}
+                              </option>
+                            ))}
+                          </select>
+                        </Field>
+                      ) : null}
+
+                      {credential.kind !== "provider-oauth" ? (
                         <Field label="Region">
                           <input
                             placeholder="eu-west-1"
@@ -2009,7 +2038,7 @@ export function WorkspaceEditor({
                             }
                           />
                         </Field>
-                      )}
+                      ) : null}
 
                       <div className="resource-card-header">
                         <div>
@@ -2019,23 +2048,50 @@ export function WorkspaceEditor({
                               : "Not authenticated"}
                           </strong>
                           <div className="field-hint">
-                            {status?.authenticated
-                              ? "A secret is held in the operating system keychain."
-                              : "No secret is stored for this reference yet."}
+                            {credential.kind === "aws-profile"
+                              ? status?.authenticated
+                                ? `Profile '${credential.sourceProfile}' currently resolves credentials.`
+                                : credential.sourceProfile
+                                  ? `Profile '${credential.sourceProfile}' cannot resolve credentials. Its SSO session may have expired.`
+                                  : "Select an AWS profile above."
+                              : status?.authenticated
+                                ? "A secret is held in the operating system keychain."
+                                : "No secret is stored for this reference yet."}
                           </div>
                         </div>
                         <div className="header-actions">
                           <button
                             className="secondary-button"
-                            disabled={busy || mode === "create"}
-                            onClick={() => importCredential(credential.id)}
+                            disabled={
+                              busy ||
+                              mode === "create" ||
+                              (credential.kind === "aws-profile" &&
+                                !credential.sourceProfile)
+                            }
+                            onClick={() =>
+                              credential.kind === "aws-profile"
+                                ? runCredentialAction(credential.id, () =>
+                                    window.opsCapsule.authenticateCredential({
+                                      workspaceId: workspaceId!,
+                                      referenceId: credential.id,
+                                    }),
+                                  )
+                                : importCredential(credential.id)
+                            }
                             type="button"
                           >
-                            {status?.authenticated
-                              ? "Replace secret"
-                              : "Authenticate"}
+                            {busy
+                              ? "Working…"
+                              : credential.kind === "aws-profile"
+                                ? status?.authenticated
+                                  ? "Re-check"
+                                  : "Sign in"
+                                : status?.authenticated
+                                  ? "Replace secret"
+                                  : "Import credential"}
                           </button>
-                          {status?.authenticated ? (
+                          {status?.authenticated &&
+                          credential.kind !== "aws-profile" ? (
                             <button
                               className="text-button danger"
                               disabled={busy}

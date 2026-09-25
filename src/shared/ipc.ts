@@ -12,6 +12,7 @@ export const IPC = {
   credentialStatus: "credential:status",
   credentialImport: "credential:import",
   credentialForget: "credential:forget",
+  credentialAuthenticate: "credential:authenticate",
   startWorkspace: "workspace:start",
   stopWorkspace: "workspace:stop",
   terminalAttach: "terminal:attach",

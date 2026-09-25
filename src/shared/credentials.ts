@@ -53,4 +53,6 @@ export interface CredentialStatus {
   readonly scope: CredentialScope;
   readonly authenticated: boolean;
   readonly expectedAccountId?: string;
+  /** For aws-profile references: the host profile credentials come from. */
+  readonly sourceProfile?: string;
 }

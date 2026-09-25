@@ -13,6 +13,7 @@ import {
 import {
   choosePathInput,
   createWorkspaceInput,
+  credentialAuthenticateInput,
   credentialForgetInput,
   credentialImportInput,
   credentialStatusInput,
@@ -33,6 +34,7 @@ import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
 import { CredentialStore, scopeContext } from "./credentials/store.js";
+import { ssoLogin } from "./credentials/aws-profile.js";
 import {
   assertUsableSecret,
   credentialStatuses,
@@ -213,6 +215,22 @@ function registerIpcHandlers(): void {
     );
     // Only status returns to the renderer; the secret never does.
     return credentialStatuses(store, manifest);
+  });
+
+  ipcMain.handle(IPC.credentialAuthenticate, async (_event, input: unknown) => {
+    const request = credentialAuthenticateInput.parse(input);
+    const { manifest } = await workspaceRegistry.document(request.workspaceId);
+    const reference = requireReference(manifest, request.referenceId);
+    if (reference.kind !== "aws-profile") {
+      throw new Error(
+        `'${reference.name}' is authenticated by importing a credential, not by signing in.`,
+      );
+    }
+    if (!reference.sourceProfile) {
+      throw new Error(`Select an AWS profile for '${reference.name}' first.`);
+    }
+    await ssoLogin(reference.sourceProfile);
+    return credentialStatuses(credentialStoreFor(), manifest);
   });
 
   ipcMain.handle(IPC.credentialForget, async (_event, input: unknown) => {

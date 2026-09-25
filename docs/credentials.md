@@ -23,6 +23,7 @@ a secret: it is safe to commit and safe to show the renderer.
 | --- | --- |
 | `id` | Stable identifier used by targets and by the broker |
 | `kind` | `aws-profile`, `aws-role`, or `provider-oauth` |
+| `sourceProfile` | For `aws-profile`, the host AWS profile to mint from |
 | `scope` | `user`, `workspace`, or `target` |
 | `providerId` | For `provider-oauth`, the consuming agent, e.g. `opencode` |
 
@@ -31,16 +32,42 @@ reused by every workspace and target, which is the expected shape for a central
 Bedrock account or a personal Copilot login. A `target`-scoped reference is
 partitioned per workspace and target so environments never share one.
 
-## Storing a credential from the UI
+## Two kinds of credential, two flows
 
-1. Open the workspace in Workspace Studio and select **Credentials**.
-2. **Add credential**, then set its name, kind, and scope.
-3. Choose **Authenticate** and select the file holding the secret.
-4. Select the credential as the workspace **inference identity**, or as a
-   target's **operational credential**.
+**AWS profiles store nothing.** An `aws-profile` reference names a profile that
+already exists on your host. When a capsule asks for credentials, the main
+process runs the AWS CLI's own resolution for that profile and passes the
+result in. The SSO cache, the role chain, and any long-lived keys stay outside
+the capsule; only the resulting short-lived session goes in. Nothing is written
+to the OpsCapsule credential store.
 
-The status line shows whether a secret is held in the OS keychain. **Sign out**
-removes the secret and keeps the reference.
+**Provider logins are stored.** A `provider-oauth` reference holds a secret,
+encrypted by the operating system, because there is no host-side resolver to
+call.
+
+### Adding an AWS identity
+
+1. Workspace Studio → **Credentials** → **Add credential**.
+2. Set kind to **AWS session** and pick the **AWS profile** from the list.
+3. The status line shows whether that profile currently resolves credentials.
+   If its SSO session has expired, choose **Sign in**; the browser flow runs in
+   the main process, never inside a capsule.
+4. Select it as a target's **operational credential**.
+
+There is no file to choose and no secret to paste. If you expected a file
+picker here, that was an earlier design and it was wrong.
+
+### Adding a provider login
+
+1. **Add credential**, set kind to **Provider login**, and set the provider,
+   for example `opencode`.
+2. Choose **Import credential** and select the file, for example
+   `~/.local/share/opencode/auth.json` after running `opencode auth login` once
+   on the host.
+3. Select it as the workspace **inference identity**.
+
+**Sign out** removes a stored secret and keeps the reference. It is only shown
+for credentials that store one.
 
 ## Storing a credential from the CLI
 
@@ -50,6 +77,9 @@ The CLI is equivalent to the UI and useful for scripting.
 npm run credentials -- help
 ```
 
+The CLI stores secrets, so it applies to provider logins. AWS profiles need no
+stored secret and are configured entirely in the UI.
+
 A central, user-scoped inference identity for Copilot through OpenCode:
 
 ```bash
@@ -57,20 +87,6 @@ npm run credentials -- set \
   --id central-inference --scope user \
   --kind provider-oauth --provider opencode \
   --file ~/.local/share/opencode/auth.json
-```
-
-A target-scoped operational AWS identity:
-
-```bash
-cat > /tmp/aws-session.json <<'JSON'
-{"accessKeyId":"ASIA...","secretAccessKey":"...","sessionToken":"...",
- "expiration":"2026-01-01T00:00:00Z"}
-JSON
-
-npm run credentials -- set \
-  --id target-operational --scope target \
-  --kind aws-profile --workspace atlas --target production \
-  --file /tmp/aws-session.json
 ```
 
 Check and remove:
@@ -97,6 +113,7 @@ credentials:
     name: Customer production
     kind: aws-profile
     scope: target
+    sourceProfile: customer-production
     region: eu-west-1
 inferenceCredential: central-inference
 targets:
@@ -154,7 +171,10 @@ plaintext must not appear in the file.
 ## Limitations
 
 - `aws-role` references are refused rather than silently treated as long-lived
-  credentials. STS role assumption is a later slice.
+  credentials. STS role assumption is a later slice; use `aws-profile` with a
+  profile that already assumes the role.
+- Resolving an AWS profile requires the AWS CLI on the host. A missing CLI is
+  reported as a failure to authenticate.
 - Authenticate imports a secret you already obtained, for example by running
   `opencode auth login` on the host once. Running the provider's own device
   code or browser flow from the main process is a later slice.

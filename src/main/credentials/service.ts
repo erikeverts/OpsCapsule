@@ -4,6 +4,7 @@ import type {
   CredentialStatus,
 } from "../../shared/credentials.js";
 import type { WorkspaceManifest } from "../../shared/workspace-schema.js";
+import { profileResolves } from "./aws-profile.js";
 import { CredentialStore, scopeContext } from "./store.js";
 
 /**
@@ -39,14 +40,31 @@ export async function credentialStatuses(
       ...(reference.expectedAccountId
         ? { expectedAccountId: reference.expectedAccountId }
         : {}),
-      authenticated: await store.has(
-        reference,
-        scopeContext(
-          reference.scope,
-          storageContextFor(manifest, reference),
-        ),
-      ),
+      ...(reference.sourceProfile
+        ? { sourceProfile: reference.sourceProfile }
+        : {}),
+      authenticated: await isAuthenticated(store, manifest, reference),
     })),
+  );
+}
+
+/**
+ * An AWS profile holds no stored secret, so its status is whether the host
+ * profile can currently produce credentials. Anything else is a stored secret.
+ */
+async function isAuthenticated(
+  store: CredentialStore,
+  manifest: WorkspaceManifest,
+  reference: CredentialReference,
+): Promise<boolean> {
+  if (reference.kind === "aws-profile") {
+    return reference.sourceProfile
+      ? profileResolves(reference.sourceProfile)
+      : false;
+  }
+  return store.has(
+    reference,
+    scopeContext(reference.scope, storageContextFor(manifest, reference)),
   );
 }
 
