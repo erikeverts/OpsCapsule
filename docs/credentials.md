@@ -232,6 +232,24 @@ plaintext must not appear in the file.
   profile that already assumes the role.
 - Resolving an AWS profile requires the AWS CLI on the host. A missing CLI is
   reported as a failure to authenticate.
+
+## Checked before launch
+
+Target readiness resolves every credential the target will use and reports the
+result next to the launch button, so a credential problem is not first seen
+inside a capsule where the agent describes it in its own words.
+
+| Condition | Result |
+| --- | --- |
+| Sign-in expired, or the profile cannot provide credentials | blocks launch |
+| Provider login never imported | blocks launch |
+| Account does not match `expectedAccountId` | blocks launch |
+| Account cannot be verified, for example offline | warning only |
+| `curl` missing while a credential is delivered by pulling | blocks launch |
+
+Verifying an account costs a call to STS, so this is the only readiness check
+that uses the network, and it runs last. Being offline is not a configuration
+problem and must not stop work, so it degrades to a warning.
 - Authenticate imports a secret you already obtained, for example by running
   `opencode auth login` on the host once. Running the provider's own device
   code or browser flow from the main process is a later slice.

@@ -178,15 +178,29 @@ function registerIpcHandlers(): void {
 
   ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
 
-  ipcMain.handle(IPC.checkTargetReadiness, async (_event, input: unknown) => {
-    const { workspaceId, targetId } = startWorkspaceInput.parse(input);
-    return checkTargetReadiness(
-      await workspaceRegistry.resolveTarget(workspaceId, targetId),
-    );
-  });
-
   const credentialStoreFor = () =>
     new CredentialStore(app.getPath("userData"), safeStorage);
+
+  ipcMain.handle(IPC.checkTargetReadiness, async (_event, input: unknown) => {
+    const { workspaceId, targetId } = startWorkspaceInput.parse(input);
+    const resolvedTarget = await workspaceRegistry.resolveTarget(
+      workspaceId,
+      targetId,
+    );
+    const store = credentialStoreFor();
+    return checkTargetReadiness(
+      resolvedTarget,
+      undefined,
+      (reference) =>
+        store.has(
+          reference,
+          scopeContext(reference.scope, {
+            workspaceId,
+            targetId,
+          }),
+        ),
+    );
+  });
 
   ipcMain.handle(IPC.credentialStatus, async (_event, input: unknown) => {
     const { workspaceId } = credentialStatusInput.parse(input);

@@ -248,7 +248,7 @@ the consuming agents impose:
 
 ### Verification and display
 
-**Not yet implemented.** The broker is to gain an `identity` readiness check — the first AWS API call in the
+The broker gains a `credentials` readiness check — the first AWS API call in the
 project. It resolves each configured identity and compares the returned account
 against `expectedIdentity.accountId`. A mismatch fails the check and blocks
 launch; an unverifiable identity is a warning, because an offline host is not
