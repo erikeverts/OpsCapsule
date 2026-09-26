@@ -65,7 +65,7 @@ The manifest gains credential *references*, never credential *values*. A
 reference is an inspectable, portable pointer:
 
 - a stable id and display name;
-- a `kind`, initially `aws-role`, `aws-profile`, or `provider-oauth`;
+- a `kind`, initially `aws-profile` or `provider-oauth`;
 - a `scope` (below); and
 - non-secret selection metadata such as a role ARN, region, expected account id,
   or provider id.
@@ -358,6 +358,12 @@ previously untested and are now regression-covered.
   That is a genuine weakening relative to the pull path and is accepted only
   because the consuming agents offer no alternative. Teardown removal is
   therefore load-bearing rather than tidiness.
+- A separate role-assumption kind was considered and dropped. A profile
+  configured with `role_arn` and `source_profile` is already assumed by the AWS
+  CLI during resolution, so the kind would have moved host configuration into
+  OpsCapsule without adding capability. Scoped-down session policies, which a
+  host profile cannot express, would be a genuine addition and can be
+  introduced when something needs them.
 - A materialized provider login may not expire at all. A GitHub Copilot login
   is a pair of GitHub OAuth App user tokens with no default expiry, so unlike a
   brokered AWS session it does not become harmless with time. Teardown removal

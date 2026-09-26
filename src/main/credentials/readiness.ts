@@ -139,13 +139,6 @@ export async function checkCredentialReadiness(
       );
       continue;
     }
-    if (reference.kind === "aws-role") {
-      worsen("fail");
-      details.push(
-        `'${reference.name}' needs STS role assumption, which is not implemented.`,
-      );
-      continue;
-    }
     const result = await checkAwsReference(reference, role);
     worsen(result.status);
     details.push(result.detail);

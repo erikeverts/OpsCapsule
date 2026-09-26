@@ -1982,7 +1982,6 @@ export function WorkspaceEditor({
                           }
                         >
                           <option value="aws-profile">AWS session</option>
-                          <option value="aws-role">AWS role</option>
                           <option value="provider-oauth">Provider login</option>
                         </select>
                       </Field>

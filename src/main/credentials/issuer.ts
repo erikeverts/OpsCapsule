@@ -13,11 +13,6 @@ import {
  * The issuer stays provider-neutral: it never inspects the credential shape,
  * so supporting a new provider means adding a delivery adapter rather than
  * editing the broker path.
- *
- * Minting genuinely short-lived credentials through STS AssumeRole is a
- * separate slice. Until then an `aws-role` reference is refused rather than
- * silently treated as a long-lived credential, so nothing claims a lifetime it
- * does not have.
  */
 export function createCredentialIssuer(
   store: CredentialStore,
@@ -34,11 +29,6 @@ export function createCredentialIssuer(
         );
       }
       return exportProfileCredentials(reference.sourceProfile);
-    }
-    if (reference.kind === "aws-role") {
-      throw new Error(
-        `Credential reference '${reference.id}' requires STS role assumption, which is not implemented yet.`,
-      );
     }
     const secret = await store.read(
       reference,

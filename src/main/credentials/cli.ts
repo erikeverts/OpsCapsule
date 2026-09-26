@@ -86,7 +86,7 @@ function usage(): string {
     "Flags:",
     "  --id <id>            Credential reference id (required)",
     "  --scope <scope>      user | workspace | target   (default: user)",
-    "  --kind <kind>        aws-profile | aws-role | provider-oauth",
+    "  --kind <kind>        aws-profile | provider-oauth",
     "  --provider <id>      Provider id for provider-oauth, e.g. opencode",
     "  --workspace <id>     Required for workspace and target scope",
     "  --target <id>        Required for target scope",

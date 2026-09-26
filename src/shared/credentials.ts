@@ -9,11 +9,14 @@ import { z } from "zod";
 export const credentialScopeSchema = z.enum(["user", "workspace", "target"]);
 export type CredentialScope = z.infer<typeof credentialScopeSchema>;
 
-export const credentialKindSchema = z.enum([
-  "aws-profile",
-  "aws-role",
-  "provider-oauth",
-]);
+/**
+ * Role assumption is deliberately absent. A profile configured with `role_arn`
+ * and `source_profile` already assumes a role, and the AWS CLI performs it
+ * during resolution, so a separate kind would only move that configuration
+ * into OpsCapsule without adding capability. Scoped-down session policies
+ * would be a real addition, but nothing needs them yet.
+ */
+export const credentialKindSchema = z.enum(["aws-profile", "provider-oauth"]);
 export type CredentialKind = z.infer<typeof credentialKindSchema>;
 
 const identifier = z
@@ -33,7 +36,6 @@ export const credentialReferenceSchema = z
     scope: credentialScopeSchema,
     /** Non-secret selection metadata only. */
     region: z.string().min(1).max(64).optional(),
-    roleArn: z.string().min(1).max(2048).optional(),
     sourceProfile: z.string().min(1).max(128).optional(),
     providerId: z.string().min(1).max(64).optional(),
     /**

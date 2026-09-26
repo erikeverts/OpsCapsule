@@ -22,7 +22,7 @@ a secret: it is safe to commit and safe to show the renderer.
 | Field | Meaning |
 | --- | --- |
 | `id` | Stable identifier used by targets and by the broker |
-| `kind` | `aws-profile`, `aws-role`, or `provider-oauth` |
+| `kind` | `aws-profile` or `provider-oauth` |
 | `sourceProfile` | For `aws-profile`, the host AWS profile to mint from |
 | `scope` | `user`, `workspace`, or `target` |
 | `providerId` | For `provider-oauth`, the consuming agent, e.g. `opencode` |
@@ -227,9 +227,9 @@ plaintext must not appear in the file.
 
 ## Limitations
 
-- `aws-role` references are refused rather than silently treated as long-lived
-  credentials. STS role assumption is a later slice; use `aws-profile` with a
-  profile that already assumes the role.
+- Role assumption is expected to be configured on the host. A profile with
+  `role_arn` and `source_profile` is assumed by the AWS CLI during resolution,
+  so OpsCapsule needs no separate role credential kind.
 - Resolving an AWS profile requires the AWS CLI on the host. A missing CLI is
   reported as a failure to authenticate.
 

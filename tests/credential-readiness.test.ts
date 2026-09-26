@@ -11,13 +11,6 @@ const copilot: CredentialReference = {
   sourceProfile: "github-copilot",
 };
 
-const awsRole: CredentialReference = {
-  id: "role",
-  name: "Assumed role",
-  kind: "aws-role",
-  scope: "target",
-};
-
 /** The real adapters, with the transport probe forced so tests are portable. */
 const withTransport = { transportAvailable: async () => true };
 const withoutTransport = { transportAvailable: async () => false };
@@ -58,15 +51,6 @@ describe("credential readiness", () => {
     );
     expect(check!.status).toBe("fail");
     expect(check!.detail).toMatch(/names no AWS profile/);
-  });
-
-  it("blocks a role reference, which cannot be delivered yet", async () => {
-    const check = await checkCredentialReadiness(
-      { operational: awsRole, hasStoredSecret: async () => false },
-      withTransport,
-    );
-    expect(check!.status).toBe("fail");
-    expect(check!.detail).toMatch(/not implemented/);
   });
 
   it("blocks launch when the broker transport is missing", async () => {
