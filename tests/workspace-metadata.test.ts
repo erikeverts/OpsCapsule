@@ -241,3 +241,45 @@ describe("capsule context", () => {
     expect(JSON.stringify(document)).not.toContain("pinned");
   });
 });
+
+describe("opening a pinned link", () => {
+  /**
+   * Mirrors the main-process handler. The renderer is not trusted to have
+   * validated anything, and a manifest is editable and shareable, so the
+   * scheme is checked again where the link is actually opened.
+   */
+  function guard(url: string): string {
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("That link is not a valid URL.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Only http and https links can be opened.");
+    }
+    return parsed.toString();
+  }
+
+  it("opens http and https", () => {
+    expect(guard("https://argocd.example.com/applications")).toContain(
+      "argocd.example.com",
+    );
+    expect(guard("http://10.0.0.1:8080")).toContain("10.0.0.1");
+  });
+
+  it("refuses schemes that would run something locally", () => {
+    for (const url of [
+      "javascript:alert(1)",
+      "file:///etc/passwd",
+      "data:text/html,<script>alert(1)</script>",
+      "vscode://file/etc/passwd",
+    ]) {
+      expect(() => guard(url)).toThrow(/http and https/);
+    }
+  });
+
+  it("refuses something that is not a URL at all", () => {
+    expect(() => guard("argocd.example.com")).toThrow(/not a valid URL/);
+  });
+});

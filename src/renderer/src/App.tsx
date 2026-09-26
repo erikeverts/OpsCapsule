@@ -7,8 +7,10 @@ import type {
   TargetReadinessReport,
 } from "../../shared/contracts";
 import type { CredentialStatus } from "../../shared/credentials";
+import { pinnedMetadata } from "../../shared/metadata";
 import { TerminalPane } from "./components/TerminalPane";
 import { CredentialSidebar } from "./components/CredentialSidebar";
+import { PinnedMetadata } from "./components/PinnedMetadata";
 import { WorkspaceEditor } from "./components/WorkspaceEditor";
 
 type EditorRoute =
@@ -368,6 +370,13 @@ export function App() {
   }
 
   const production = selectedTarget?.risk === "production";
+  // Pinned entries follow the selected target, since a target may override a
+  // workspace entry such as a per-environment URL.
+  const pinnedEntries = useMemo(
+    () => pinnedMetadata(selectedTarget?.metadata ?? []),
+    [selectedTarget],
+  );
+
   const selectedWorkspaceRunning = selectedWorkspace
     ? Object.values(sessions).some(
         (session) => session.workspace.id === selectedWorkspace.id,
@@ -407,6 +416,11 @@ export function App() {
         >
           <span>+</span> New workspace
         </button>
+
+        <PinnedMetadata
+          entries={pinnedEntries}
+          onError={(message) => setError(message)}
+        />
 
         <CredentialSidebar
           user={credentials.user}

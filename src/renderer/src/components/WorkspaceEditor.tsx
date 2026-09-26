@@ -9,6 +9,10 @@ import type {
 } from "../../../shared/contracts";
 import type { CredentialStatus } from "../../../shared/credentials";
 import {
+  METADATA_ENTRY_LIMIT,
+  type MetadataEntry,
+} from "../../../shared/metadata";
+import {
   identifierFromName,
   uniqueIdentifier,
 } from "../../../shared/identifiers";
@@ -34,6 +38,7 @@ type EditorSection =
   | "kubernetes"
   | "agents"
   | "credentials"
+  | "context"
   | "targets";
 
 interface WorkspaceEditorProps {
@@ -65,6 +70,7 @@ const editorSections: Array<{
     label: "Credentials",
     description: "Identities and authentication",
   },
+  { id: "context", label: "Context", description: "Facts the agent should know" },
   { id: "targets", label: "Targets", description: "Operational environments" },
 ];
 
@@ -266,6 +272,134 @@ function Field({
       {children}
       {hint ? <small>{hint}</small> : null}
     </label>
+  );
+}
+
+/**
+ * Metadata rows shared by the workspace section and each target, so the two
+ * behave identically and a target override looks like what it is: the same
+ * kind of row, with the same key.
+ */
+function MetadataRows({
+  entries,
+  limit,
+  onChange,
+}: {
+  entries: MetadataEntry[];
+  limit?: number;
+  onChange: (mutate: (next: MetadataEntry[]) => void) => void;
+}) {
+  const atLimit = limit !== undefined && entries.length >= limit;
+  return (
+    <div className="studio-stack">
+      {entries.map((entry, index) => (
+        <article className="studio-card" key={index}>
+          <div className="resource-card-header">
+            <div>
+              <strong>{entry.label || entry.key || "New entry"}</strong>
+              <div className="field-hint">
+                {entry.pinned ? "Pinned · " : ""}
+                {entry.kind === "url" ? "Link" : "Text"}
+              </div>
+            </div>
+            <button
+              className="text-button danger"
+              onClick={() => onChange((next) => next.splice(index, 1))}
+              type="button"
+            >
+              Remove
+            </button>
+          </div>
+
+          <Field label="Key" hint="Used by the agent and in context.json.">
+            <input
+              placeholder="project-code"
+              value={entry.key}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.key = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Label">
+            <input
+              placeholder="Optional display name"
+              value={entry.label ?? ""}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.label = event.target.value || undefined;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Value">
+            <input
+              value={entry.value}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.value = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Kind">
+            <select
+              value={entry.kind}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.kind = event.target.value as MetadataEntry["kind"];
+                })
+              }
+            >
+              <option value="text">Text</option>
+              <option value="url">Link</option>
+            </select>
+          </Field>
+
+          <label className="checkbox-field">
+            <input
+              checked={entry.pinned}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.pinned = event.target.checked;
+                })
+              }
+              type="checkbox"
+            />
+            <span>
+              Pin for quick access
+              <span className="field-hint">
+                Shows it in the sidebar. The agent receives every entry either
+                way.
+              </span>
+            </span>
+          </label>
+        </article>
+      ))}
+
+      <button
+        className="secondary-button"
+        disabled={atLimit}
+        onClick={() =>
+          onChange((next) => {
+            next.push({ key: "", value: "", kind: "text", pinned: false });
+          })
+        }
+        type="button"
+      >
+        Add entry
+      </button>
+      {atLimit ? (
+        <p className="field-hint">
+          A target can resolve at most {limit} entries, because every one of
+          them is given to the agent on every turn.
+        </p>
+      ) : null}
+    </div>
   );
 }
 
@@ -2245,6 +2379,29 @@ export function WorkspaceEditor({
             </>
           ) : null}
 
+          {section === "context" ? (
+            <>
+              <EditorSectionHeader
+                title="Workspace context"
+                description="Non-secret facts shared by every target, given to the agent on every turn and available as JSON inside the capsule."
+              />
+              <div className="studio-card">
+                <p className="field-hint">
+                  This is not a secret store. Values are written to the
+                  manifest in plain text and handed to the agent, so anything
+                  confidential belongs in a credential.
+                </p>
+              </div>
+              <MetadataRows
+                entries={draft.context.metadata}
+                limit={METADATA_ENTRY_LIMIT}
+                onChange={(mutate) =>
+                  updateDraft((next) => mutate(next.context.metadata))
+                }
+              />
+            </>
+          ) : null}
+
           {section === "targets" ? (
             <>
               <EditorSectionHeader
@@ -2423,6 +2580,19 @@ export function WorkspaceEditor({
                               </option>
                             ))}
                         </select>
+                      </Field>
+                      <Field
+                        label="Context overrides"
+                        hint="Entries with the same key replace the workspace value for this target, which is how one key can hold a different URL per environment."
+                      >
+                        <MetadataRows
+                          entries={target.context.metadata}
+                          onChange={(mutate) =>
+                            updateDraft((next) =>
+                              mutate(next.targets[index]!.context.metadata),
+                            )
+                          }
+                        />
                       </Field>
                       <Field label="Kubernetes context">
                         <select

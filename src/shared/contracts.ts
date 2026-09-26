@@ -1,5 +1,6 @@
 import { z } from "zod";
 import type { CredentialStatus } from "./credentials.js";
+import type { MetadataEntry } from "./metadata.js";
 import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
@@ -44,6 +45,8 @@ export interface KubernetesContextSummary {
 }
 
 export interface WorkspaceTargetSummary {
+  /** Workspace entries with this target's overrides applied. Non-secret. */
+  metadata: MetadataEntry[];
   id: string;
   name: string;
   environment: string;
@@ -292,6 +295,10 @@ export const credentialImportInput = z.object({
   secret: z.string().min(1).max(200_000).optional(),
 });
 
+export const openExternalInput = z.object({
+  url: z.string().min(1).max(2048),
+});
+
 export const credentialOverviewInput = z.object({
   workspaceId: z.string().min(1).optional(),
   targetId: z.string().min(1).optional(),
@@ -364,6 +371,8 @@ export interface OpsCapsuleApi {
     referenceId: string;
     targetId?: string;
   }): Promise<CredentialStatus[]>;
+  /** Opens a pinned link in the user's browser. Refuses anything but http(s). */
+  openExternal(url: string): Promise<void>;
   checkTargetReadiness(
     workspaceId: string,
     targetId: string,

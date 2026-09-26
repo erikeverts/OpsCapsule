@@ -697,6 +697,7 @@ export class WorkspaceRegistry {
     );
 
     const summary: WorkspaceTargetSummary = {
+      metadata,
       id: target.id,
       name: target.name,
       environment: target.environment,

@@ -35,6 +35,7 @@ const api: OpsCapsuleApi = {
   authenticateCredential: (input) =>
     ipcRenderer.invoke(IPC.credentialAuthenticate, input),
   forgetCredential: (input) => ipcRenderer.invoke(IPC.credentialForget, input),
+  openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, { url }),
   checkTargetReadiness: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.checkTargetReadiness, { workspaceId, targetId }),
   startWorkspace: (workspaceId, targetId) =>

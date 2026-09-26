@@ -14,6 +14,7 @@ export const IPC = {
   credentialImport: "credential:import",
   credentialForget: "credential:forget",
   credentialAuthenticate: "credential:authenticate",
+  openExternal: "shell:open-external",
   startWorkspace: "workspace:start",
   stopWorkspace: "workspace:stop",
   terminalAttach: "terminal:attach",

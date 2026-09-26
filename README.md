@@ -116,4 +116,6 @@ terminal runtime and `RunAsNode` decision are documented in
 broker, credential scopes, and the separation between operational and inference
 identities are described in
 [ADR 0007](docs/adr/0007-credential-broker-and-inference-identity.md), with
-setup and testing steps in [credentials](docs/credentials.md).
+setup and testing steps in [credentials](docs/credentials.md). Non-secret
+facts a workspace carries, and how they reach the agent, are described in
+[workspace context](docs/workspace-context.md).

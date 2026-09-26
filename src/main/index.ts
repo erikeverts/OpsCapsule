@@ -8,6 +8,7 @@ import {
   net,
   protocol,
   safeStorage,
+  shell,
   utilityProcess,
 } from "electron";
 import {
@@ -18,6 +19,7 @@ import {
   credentialImportInput,
   credentialOverviewInput,
   credentialStatusInput,
+  openExternalInput,
   deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
@@ -177,6 +179,23 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
+
+  ipcMain.handle(IPC.openExternal, async (_event, input: unknown) => {
+    const { url } = openExternalInput.parse(input);
+    // The renderer is not trusted to have validated this, and a manifest is
+    // editable and shareable. Anything but http or https would turn a pinned
+    // link into a way to run something on the machine.
+    let parsed: URL;
+    try {
+      parsed = new URL(url);
+    } catch {
+      throw new Error("That link is not a valid URL.");
+    }
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+      throw new Error("Only http and https links can be opened.");
+    }
+    await shell.openExternal(parsed.toString());
+  });
 
   const credentialStoreFor = () =>
     new CredentialStore(app.getPath("userData"), safeStorage);
