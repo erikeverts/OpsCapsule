@@ -8,6 +8,8 @@ import type {
 import { checkSandboxRuntimeAvailability } from "./isolation/sandbox-runtime.js";
 import { inspectAgentConfigurationFile } from "./local-resources.js";
 import { resolveExecutable } from "./runtime-adapters/readiness.js";
+import type { CredentialReference } from "../shared/credentials.js";
+import { checkCredentialReadiness } from "./credentials/readiness.js";
 import { RuntimeAdapterRegistry } from "./runtime-adapters/registry.js";
 import {
   resolveConfiguredPath,
@@ -128,6 +130,12 @@ async function configurationCheck(
 export async function checkTargetReadiness(
   resolvedTarget: ResolvedWorkspaceTarget,
   adapters = new RuntimeAdapterRegistry(),
+  /**
+   * Whether a provider login has been imported. Supplied by the caller
+   * because the credential store needs an encryptor this module has no
+   * business knowing about.
+   */
+  hasStoredSecret?: (reference: CredentialReference) => Promise<boolean>,
 ): Promise<TargetReadinessReport> {
   const checks: TargetReadinessCheck[] = [];
   try {
@@ -209,6 +217,22 @@ export async function checkTargetReadiness(
         detail: detail(error),
       });
     }
+  }
+
+  // Credentials are checked last: it is the only check that reaches the
+  // network, and there is no point paying for it when something earlier has
+  // already blocked the launch.
+  const credentials = await checkCredentialReadiness({
+    ...(resolvedTarget.credentials.operational
+      ? { operational: resolvedTarget.credentials.operational }
+      : {}),
+    ...(resolvedTarget.credentials.inference
+      ? { inference: resolvedTarget.credentials.inference }
+      : {}),
+    hasStoredSecret: hasStoredSecret ?? (async () => false),
+  });
+  if (credentials) {
+    checks.push(credentials);
   }
 
   return { status: reportStatus(checks), checks };

@@ -117,3 +117,64 @@ export async function ssoLogin(profile: string): Promise<void> {
     );
   }
 }
+
+export interface CallerIdentity {
+  readonly accountId: string;
+}
+
+/**
+ * Verifies which account a profile actually resolves to.
+ *
+ * `expectedAccountId` has until now been a declared value shown in the UI and
+ * never checked, so a target could display one account and use another. This
+ * is the only way to know, and it runs in the main process where the host's
+ * network is available rather than inside a capsule.
+ */
+export async function callerIdentity(profile: string): Promise<CallerIdentity> {
+  try {
+    const { stdout } = await run(
+      "aws",
+      [
+        "sts",
+        "get-caller-identity",
+        "--profile",
+        profile,
+        "--output",
+        "json",
+      ],
+      { timeout: 20_000, env: profileResolutionEnvironment },
+    );
+    const parsed = JSON.parse(stdout) as { Account?: string };
+    if (!parsed.Account) {
+      throw new AwsProfileError(
+        `AWS profile '${profile}' returned no account identity.`,
+      );
+    }
+    return { accountId: parsed.Account };
+  } catch (error) {
+    if (error instanceof AwsProfileError) {
+      throw error;
+    }
+    const failure = error as NodeJS.ErrnoException & { stderr?: string };
+    if (failure.code === "ENOENT") {
+      throw new AwsProfileError(
+        "The AWS CLI is not installed, so the account cannot be verified.",
+      );
+    }
+    throw new AwsProfileError(describeFailure(profile, failure.stderr ?? ""));
+  }
+}
+
+/**
+ * Whether the broker transport a capsule needs is present on this host. The
+ * helper shells out to curl, so a missing curl turns every credential request
+ * inside the capsule into an opaque agent error.
+ */
+export async function brokerTransportAvailable(): Promise<boolean> {
+  try {
+    await run("/usr/bin/curl", ["--version"], { timeout: 5_000 });
+    return true;
+  } catch {
+    return false;
+  }
+}

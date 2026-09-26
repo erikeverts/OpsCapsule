@@ -76,7 +76,7 @@ const macOsSandboxAvailable =
 const operational: CredentialReference = {
   id: "target-operational",
   name: "Customer production",
-  kind: "aws-role",
+  kind: "aws-profile",
   scope: "target",
   region: "eu-west-1",
   expectedAccountId: "111122223333",
@@ -85,7 +85,7 @@ const operational: CredentialReference = {
 const inference: CredentialReference = {
   id: "central-inference",
   name: "Central Bedrock",
-  kind: "aws-role",
+  kind: "aws-profile",
   scope: "user",
   region: "us-east-1",
 };
@@ -692,7 +692,6 @@ describe("provider-agnostic delivery", () => {
 
   it("routes each credential kind to its own delivery adapter", () => {
     expect(registry.adapterFor("aws-profile").id).toBe("aws");
-    expect(registry.adapterFor("aws-role").id).toBe("aws");
     expect(registry.adapterFor("provider-oauth").id).toBe("provider-oauth");
   });
 
