@@ -24,6 +24,7 @@ function workspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
+    context: { metadata: [] },
     credentials: [],
     cloudConnections: [
       { id: "aws", name: "AWS", provider: "aws", config: {} },
@@ -53,6 +54,7 @@ function workspace(): WorkspaceManifest {
         directories: ["directory"],
         defaultDirectory: "directory",
         agentRuntime: { adapter: "command", command: "$SHELL", args: [] },
+        context: { metadata: [] },
         isolation: {
           mode: "context-only",
           network: { mode: "deny", allowedDomains: [] },

@@ -38,6 +38,7 @@ import {
   type WorkspaceTarget,
 } from "../shared/workspace-schema.js";
 import type { CredentialReference } from "../shared/credentials.js";
+import { resolveMetadata, type MetadataEntry } from "../shared/metadata.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { seedDefaultWorkspaces } from "./default-workspaces.js";
 import {
@@ -67,6 +68,8 @@ export interface ResolvedWorkspaceTarget {
     operational?: CredentialReference;
     inference?: CredentialReference;
   };
+  /** Workspace entries with the target's overrides applied. */
+  metadata: MetadataEntry[];
   summary: WorkspaceTargetSummary;
 }
 
@@ -688,6 +691,11 @@ export class WorkspaceRegistry {
       inference: findCredential(workspace.manifest.inferenceCredential),
     };
 
+    const metadata = resolveMetadata(
+      workspace.manifest.context.metadata,
+      target.context.metadata,
+    );
+
     const summary: WorkspaceTargetSummary = {
       id: target.id,
       name: target.name,
@@ -724,6 +732,7 @@ export class WorkspaceRegistry {
       defaultDirectory,
       agent,
       credentials,
+      metadata,
       summary,
     };
   }

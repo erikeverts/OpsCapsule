@@ -165,6 +165,8 @@ export interface RuntimePaths {
    */
   brokerSocket?: string;
   brokerHelper?: string;
+  /** Directory holding the workspace context the agent may read. */
+  context?: string;
 }
 
 export type ReadinessCheckStatus = "pass" | "warning" | "fail";

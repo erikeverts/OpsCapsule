@@ -87,6 +87,7 @@ function blankWorkspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
+    context: { metadata: [] },
     credentials: [],
     cloudConnections: [],
     kubernetesContexts: [],
@@ -106,6 +107,7 @@ function blankWorkspace(): WorkspaceManifest {
         risk: "development",
         directories: ["workspace"],
         defaultDirectory: "workspace",
+        context: { metadata: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -2280,6 +2282,7 @@ export function WorkspaceEditor({
                                     args: [],
                                   },
                                 }),
+                          context: { metadata: [] },
                           isolation: {
                             mode: "enforced",
                             network: { mode: "public", allowedDomains: [] },

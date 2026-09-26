@@ -20,6 +20,11 @@ import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { writeBrokerHelper } from "./credentials/helper.js";
+import {
+  composeAgentInstructions,
+  CONTEXT_DIRECTORY_VARIABLE,
+  writeCapsuleContext,
+} from "./workspace-context.js";
 import { CredentialDeliveryRegistry } from "./credentials/delivery/registry.js";
 import { OPERATIONAL_PROFILE_NAME } from "./credentials/delivery/aws.js";
 import {
@@ -352,9 +357,16 @@ export async function createWorkspaceRuntime(
   );
   const kubeconfig = join(root, "kubeconfig.yaml");
   const sandboxConfig = join(root, "sandbox.json");
-  const agentInstructions = resolvedTarget.workspace.manifest.agentInstructions
+  // Instructions now carry the generated context catalog, so a workspace with
+  // metadata but no written instructions still gets a file.
+  const instructionsBody = composeAgentInstructions(
+    resolvedTarget.workspace.manifest.agentInstructions,
+    { metadata: resolvedTarget.metadata },
+  );
+  const agentInstructions = instructionsBody
     ? join(root, "agent-instructions.md")
     : undefined;
+  const contextDirectory = join(root, "context");
   const targetState = join(
     baseDirectory,
     "state",
@@ -403,12 +415,14 @@ export async function createWorkspaceRuntime(
   ]);
   await assertStateDirectory(targetState);
   if (agentInstructions) {
-    await writeFile(
-      agentInstructions,
-      resolvedTarget.workspace.manifest.agentInstructions!,
-      { encoding: "utf8", mode: 0o600 },
-    );
+    await writeFile(agentInstructions, instructionsBody!, {
+      encoding: "utf8",
+      mode: 0o600,
+    });
   }
+  await writeCapsuleContext(contextDirectory, {
+    metadata: resolvedTarget.metadata,
+  });
   if (brokerHelper && brokerSocket) {
     await writeBrokerHelper(brokerHelper, brokerSocket);
   }
@@ -455,6 +469,7 @@ export async function createWorkspaceRuntime(
     ...(agentInstructions ? { agentInstructions } : {}),
     ...(brokerSocket ? { brokerSocket } : {}),
     ...(brokerHelper ? { brokerHelper } : {}),
+    context: contextDirectory,
   };
 }
 
@@ -552,6 +567,9 @@ export function buildWorkspaceEnvironment(
     OPSCAPSULE_ENVIRONMENT: resolvedTarget.target.environment,
     ...(runtime.agentInstructions
       ? { OPSCAPSULE_AGENT_INSTRUCTIONS: runtime.agentInstructions }
+      : {}),
+    ...(runtime.context
+      ? { [CONTEXT_DIRECTORY_VARIABLE]: runtime.context }
       : {}),
     ...(resolvedTarget.kubernetes
       ? {

@@ -23,6 +23,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "default-agent",
+    context: { metadata: [] },
     credentials: [],
     cloudConnections: [
       {
@@ -92,6 +93,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "development",
         directories: ["application", "documentation"],
         defaultDirectory: "application",
+        context: { metadata: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -106,6 +108,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "production",
         directories: ["application", "documentation"],
         defaultDirectory: "application",
+        context: { metadata: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -135,6 +138,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "default-agent",
+    context: { metadata: [] },
     credentials: [],
     cloudConnections: [
       {
@@ -178,6 +182,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
         kubernetesContext: "staging",
         directories: ["operations"],
         defaultDirectory: "operations",
+        context: { metadata: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
