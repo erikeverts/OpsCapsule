@@ -1,4 +1,14 @@
-import type { MetadataEntry } from "../../../shared/metadata";
+import { isLinkValue, type MetadataEntry } from "../../../shared/metadata";
+
+/** Drops the scheme, which is never the interesting part in a narrow column. */
+function displayUrl(value: string): string {
+  try {
+    const url = new URL(value);
+    return `${url.host}${url.pathname === "/" ? "" : url.pathname}`;
+  } catch {
+    return value;
+  }
+}
 
 interface PinnedMetadataProps {
   entries: MetadataEntry[];
@@ -23,7 +33,7 @@ export function PinnedMetadata({ entries, onError }: PinnedMetadataProps) {
       <ul className="pinned-list">
         {entries.map((entry) => (
           <li key={entry.key}>
-            {entry.kind === "url" ? (
+            {isLinkValue(entry.value) ? (
               <button
                 className="pinned-link"
                 onClick={() => {
@@ -34,8 +44,13 @@ export function PinnedMetadata({ entries, onError }: PinnedMetadataProps) {
                 title={entry.value}
                 type="button"
               >
-                <span className="pinned-name">{entry.label ?? entry.key}</span>
-                <span aria-hidden="true">↗</span>
+                <span className="pinned-name">
+                  {entry.label ?? entry.key}
+                  <span aria-hidden="true"> ↗</span>
+                </span>
+                {/* The value gets its own line: a sidebar column is far too
+                    narrow to put a name and a URL side by side. */}
+                <span className="pinned-text">{displayUrl(entry.value)}</span>
               </button>
             ) : (
               <div className="pinned-value" title={entry.value}>

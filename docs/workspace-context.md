@@ -25,7 +25,6 @@ context:
       value: "55021"
     - key: argocd
       label: ArgoCD
-      kind: url
       value: https://argocd.example.com
       pinned: true
 targets:
@@ -35,7 +34,6 @@ targets:
         # Same key, different value: the per-environment URL.
         - key: argocd
           label: ArgoCD
-          kind: url
           value: https://argocd-ri-obs-dev.example.com
           pinned: true
 ```
@@ -45,8 +43,12 @@ targets:
 | `key` | Lowercase identifier, used by the agent and in `context.json` |
 | `label` | Optional display name |
 | `value` | The fact itself |
-| `kind` | `text`, or `url` for something clickable |
 | `pinned` | Show it in the sidebar. A display choice only |
+
+Whether an entry is a link is derived from its value, not declared. An `http`
+or `https` value is opened in your browser; anything else is shown as text.
+Asking for the kind separately only created a way to get it wrong, and getting
+it wrong made an entry silently unclickable.
 
 A target entry replaces a workspace entry with the same key, which is what
 makes a per-environment URL one key rather than `argocd-dev` and `argocd-prod`
@@ -87,10 +89,15 @@ can widen a capsule's isolation.
 
 ## Pinned entries
 
-Pinned entries appear in the sidebar for the selected target. Links open in
-your browser; only `http` and `https` are accepted, checked both when the
-manifest is saved and again when the link is opened, so a shared manifest
-cannot turn a pinned link into a way to run something locally.
+Pinned entries appear in the sidebar for the selected target, with the name and
+the value on separate lines, because a sidebar column is too narrow to show
+both side by side.
+
+Links open in your browser. Only `http` and `https` values are treated as
+links, and the scheme is checked again in the main process when the link is
+opened, so a shared manifest cannot turn a pinned entry into a way to run
+something locally. A `javascript:` or `file:` value is not an error; it is
+simply never clickable.
 
 Pinning changes nothing about what the agent is told. It receives every entry
 either way.

@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import {
+  isLinkValue,
   METADATA_ENTRY_LIMIT,
   metadataEntrySchema,
+  metadataKind,
   pinnedMetadata,
   resolveMetadata,
   secretLikeMetadataKeys,
@@ -20,40 +22,42 @@ const entry = (key: string, value: string, extra: object = {}) =>
   metadataEntrySchema.parse({ key, value, ...extra });
 
 describe("metadata entries", () => {
-  it("defaults to a plain text entry that is not pinned", () => {
+  it("stores only what the user typed", () => {
     expect(entry("project-code", "DIP-1234")).toEqual({
       key: "project-code",
       value: "DIP-1234",
-      kind: "text",
       pinned: false,
     });
   });
 
-  it("rejects a url entry whose value is not a url", () => {
-    expect(() =>
-      entry("argocd", "argocd.example.com", { kind: "url" }),
-    ).toThrow(/not a URL/);
+  it("derives link-ness from the value rather than asking", () => {
+    // Declaring the kind separately was a way to get it wrong: a URL typed
+    // into an entry left on "text" was silently unclickable.
+    expect(metadataKind(entry("argocd", "https://argocd.example.com"))).toBe("url");
+    expect(metadataKind(entry("internal", "http://10.0.0.1:8080"))).toBe("url");
+    expect(metadataKind(entry("project-code", "DIP-1234"))).toBe("text");
   });
 
-  it("rejects a url that could run something locally", () => {
-    // A manifest is shareable and pinned entries are opened by clicking, so
-    // anything but http or https turns a pin into local code execution.
+  it("treats anything that could run locally as text, never a link", () => {
+    // Not an error: it is simply not something to open, so it is displayed
+    // and never clickable.
     for (const value of [
       "javascript:alert(1)",
       "file:///etc/passwd",
       "data:text/html,<script>",
+      "vscode://file/etc/passwd",
     ]) {
-      expect(() => entry("link", value, { kind: "url" })).toThrow(
-        /http or https/,
-      );
+      expect(isLinkValue(value)).toBe(false);
+      expect(metadataKind(entry("link", value))).toBe("text");
     }
   });
 
-  it("accepts http and https", () => {
-    expect(entry("argocd", "https://argocd.example.com", { kind: "url" }).kind).toBe("url");
-    expect(entry("internal", "http://10.0.0.1:8080", { kind: "url" }).value).toBe(
-      "http://10.0.0.1:8080",
-    );
+  it("still loads a manifest written while kind was a stored field", () => {
+    expect(entry("argocd", "http://argo.example.com", { kind: "text" })).toEqual({
+      key: "argocd",
+      value: "http://argo.example.com",
+      pinned: false,
+    });
   });
 
   it("rejects keys that are not simple identifiers", () => {
@@ -67,8 +71,8 @@ describe("resolution", () => {
     // The point of the override: one key, a different value per environment,
     // rather than argocd-dev and argocd-prod living side by side.
     const resolved = resolveMetadata(
-      [entry("argocd", "https://argocd.example.com", { kind: "url" }), entry("cost-center", "55021")],
-      [entry("argocd", "https://argocd-dev.example.com", { kind: "url" })],
+      [entry("argocd", "https://argocd.example.com"), entry("cost-center", "55021")],
+      [entry("argocd", "https://argocd-dev.example.com")],
     );
     expect(resolved).toHaveLength(2);
     expect(resolved.find((item) => item.key === "argocd")!.value).toBe(
@@ -183,7 +187,6 @@ describe("capsule context", () => {
   const metadata = [
     entry("project-code", "DIP-1234"),
     entry("argocd", "https://argocd-dev.example.com", {
-      kind: "url",
       label: "ArgoCD",
       pinned: true,
     }),

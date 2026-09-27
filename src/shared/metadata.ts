@@ -11,10 +11,44 @@ import { z } from "zod";
  */
 export const METADATA_ENTRY_LIMIT = 20;
 
-export const metadataKindSchema = z.enum(["text", "url"]);
-export type MetadataKind = z.infer<typeof metadataKindSchema>;
+export type MetadataKind = "text" | "url";
 
-export const metadataEntrySchema = z
+/**
+ * Whether a value is something that can be opened.
+ *
+ * Derived rather than declared. A value starting with http or https is a link;
+ * asking someone to say so in a second field only creates a way to get it
+ * wrong, and getting it wrong makes the entry unclickable for no visible
+ * reason. Anything else, including a javascript: or file: URL, is text and is
+ * never clickable, which is also the safe default.
+ */
+export function isLinkValue(value: string): boolean {
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return false;
+  }
+  return url.protocol === "http:" || url.protocol === "https:";
+}
+
+export function metadataKind(entry: { value: string }): MetadataKind {
+  return isLinkValue(entry.value) ? "url" : "text";
+}
+
+const withoutLegacyKind = (value: unknown): unknown => {
+  // `kind` was briefly a stored field. Dropped rather than tolerated, so a
+  // manifest written during that window still loads.
+  if (value && typeof value === "object" && !Array.isArray(value) && "kind" in value) {
+    const { kind: _legacy, ...rest } = value as Record<string, unknown>;
+    return rest;
+  }
+  return value;
+};
+
+export const metadataEntrySchema = z.preprocess(
+  withoutLegacyKind,
+  z
   .object({
     key: z
       .string()
@@ -27,37 +61,11 @@ export const metadataEntrySchema = z
     /** Shown instead of the key where there is room for it. */
     label: z.string().min(1).max(120).optional(),
     value: z.string().min(1).max(2048),
-    kind: metadataKindSchema.default("text"),
     /** Shown in the sidebar for quick access. A display choice only. */
     pinned: z.boolean().default(false),
   })
-  .strict()
-  .superRefine((entry, context) => {
-    if (entry.kind !== "url") {
-      return;
-    }
-    let url: URL;
-    try {
-      url = new URL(entry.value);
-    } catch {
-      context.addIssue({
-        code: "custom",
-        path: ["value"],
-        message: `'${entry.key}' is a URL entry but its value is not a URL`,
-      });
-      return;
-    }
-    // A manifest is editable and shareable, and pinned entries are opened by
-    // clicking. Anything but http or https turns that into a way to run
-    // something locally.
-    if (url.protocol !== "http:" && url.protocol !== "https:") {
-      context.addIssue({
-        code: "custom",
-        path: ["value"],
-        message: `'${entry.key}' must be an http or https URL`,
-      });
-    }
-  });
+  .strict(),
+);
 
 export type MetadataEntry = z.infer<typeof metadataEntrySchema>;
 

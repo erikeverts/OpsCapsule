@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { MetadataEntry } from "../shared/metadata.js";
+import { metadataKind, type MetadataEntry } from "../shared/metadata.js";
 
 /**
  * The capsule's view of what the workspace knows.
@@ -30,7 +30,7 @@ export function buildContextDocument(context: CapsuleContext): string {
         key: entry.key,
         ...(entry.label ? { label: entry.label } : {}),
         value: entry.value,
-        kind: entry.kind,
+        kind: metadataKind(entry),
       })),
       // documents: [] arrives with the document slice; the shape is fixed now
       // so nothing that reads this file has to change when it does.

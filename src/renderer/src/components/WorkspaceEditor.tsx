@@ -9,6 +9,7 @@ import type {
 } from "../../../shared/contracts";
 import type { CredentialStatus } from "../../../shared/credentials";
 import {
+  isLinkValue,
   METADATA_ENTRY_LIMIT,
   type MetadataEntry,
 } from "../../../shared/metadata";
@@ -297,10 +298,18 @@ function MetadataRows({
           <div className="resource-card-header">
             <div>
               <strong>{entry.label || entry.key || "New entry"}</strong>
-              <div className="field-hint">
-                {entry.pinned ? "Pinned · " : ""}
-                {entry.kind === "url" ? "Link" : "Text"}
-              </div>
+              {/* Only say something when there is something to say. A label
+                  reading "Text" on every row is noise. */}
+              {entry.pinned || isLinkValue(entry.value) ? (
+                <div className="field-hint">
+                  {[
+                    entry.pinned ? "Pinned" : undefined,
+                    isLinkValue(entry.value) ? "Opens in your browser" : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              ) : null}
             </div>
             <button
               className="text-button danger"
@@ -335,7 +344,10 @@ function MetadataRows({
             />
           </Field>
 
-          <Field label="Value">
+          <Field
+            label="Value"
+            hint="An http or https value becomes a link you can open from the sidebar."
+          >
             <input
               value={entry.value}
               onChange={(event) =>
@@ -344,20 +356,6 @@ function MetadataRows({
                 })
               }
             />
-          </Field>
-
-          <Field label="Kind">
-            <select
-              value={entry.kind}
-              onChange={(event) =>
-                onChange((next) => {
-                  next[index]!.kind = event.target.value as MetadataEntry["kind"];
-                })
-              }
-            >
-              <option value="text">Text</option>
-              <option value="url">Link</option>
-            </select>
           </Field>
 
           <label className="checkbox-field">
@@ -386,7 +384,7 @@ function MetadataRows({
         disabled={atLimit}
         onClick={() =>
           onChange((next) => {
-            next.push({ key: "", value: "", kind: "text", pinned: false });
+            next.push({ key: "", value: "", pinned: false });
           })
         }
         type="button"
