@@ -1,7 +1,9 @@
 import { z } from "zod";
 import { credentialReferenceSchema } from "./credentials.js";
 import {
+  DOCUMENT_LIMIT,
   METADATA_ENTRY_LIMIT,
+  resolveDocuments,
   resolveMetadata,
   secretLikeMetadataKeys,
   workspaceContextSchema,
@@ -331,6 +333,7 @@ export function validateWorkspaceReferences(
   const agentProfileIds = new Set(manifest.agentProfiles.map(({ id }) => id));
   const credentialIds = new Set(manifest.credentials.map(({ id }) => id));
 
+  assertUniqueIds(manifest.context.documents, "workspace document");
   assertUniqueMetadataKeys(manifest.context.metadata, "workspace");
   const workspaceSecretLike = secretLikeMetadataKeys(manifest.context.metadata);
   if (workspaceSecretLike.length > 0) {
@@ -358,6 +361,7 @@ export function validateWorkspaceReferences(
   }
 
   for (const target of manifest.targets) {
+    assertUniqueIds(target.context.documents, `target '${target.id}' document`);
     assertUniqueMetadataKeys(target.context.metadata, `target '${target.id}'`);
     const targetSecretLike = secretLikeMetadataKeys(target.context.metadata);
     if (targetSecretLike.length > 0) {
@@ -374,6 +378,15 @@ export function validateWorkspaceReferences(
     if (effective.length > METADATA_ENTRY_LIMIT) {
       throw new Error(
         `Target '${target.id}' resolves ${effective.length} metadata entries, more than the limit of ${METADATA_ENTRY_LIMIT}`,
+      );
+    }
+    const resolvedDocuments = resolveDocuments(
+      manifest.context.documents,
+      target.context.documents,
+    );
+    if (resolvedDocuments.length > DOCUMENT_LIMIT) {
+      throw new Error(
+        `Target '${target.id}' resolves ${resolvedDocuments.length} documents, more than the limit of ${DOCUMENT_LIMIT}`,
       );
     }
     if (target.agentProfile && !agentProfileIds.has(target.agentProfile)) {

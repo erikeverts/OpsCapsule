@@ -1,6 +1,10 @@
-import { mkdir, writeFile } from "node:fs/promises";
-import { join } from "node:path";
-import { metadataKind, type MetadataEntry } from "../shared/metadata.js";
+import { chmod, copyFile, mkdir, writeFile } from "node:fs/promises";
+import { basename, join } from "node:path";
+import {
+  metadataKind,
+  type ContextDocument,
+  type MetadataEntry,
+} from "../shared/metadata.js";
 
 /**
  * The capsule's view of what the workspace knows.
@@ -18,8 +22,18 @@ export const CONTEXT_FILE = "context.json";
  * agent needs no tool call to know a project code. Documents will be listed
  * rather than inlined, because a runbook cannot go in every prompt.
  */
+export const DOCUMENTS_DIRECTORY = "documents";
+
+export type CapsuleDocument = ContextDocument & { readonly path: string };
+
 export interface CapsuleContext {
   readonly metadata: readonly MetadataEntry[];
+  readonly documents: readonly CapsuleDocument[];
+}
+
+/** Where a document sits inside the capsule, relative to the context root. */
+export function capsuleDocumentPath(document: CapsuleDocument): string {
+  return `${DOCUMENTS_DIRECTORY}/${basename(document.path)}`;
 }
 
 export function buildContextDocument(context: CapsuleContext): string {
@@ -32,8 +46,12 @@ export function buildContextDocument(context: CapsuleContext): string {
         value: entry.value,
         kind: metadataKind(entry),
       })),
-      // documents: [] arrives with the document slice; the shape is fixed now
-      // so nothing that reads this file has to change when it does.
+      documents: context.documents.map((document) => ({
+        id: document.id,
+        title: document.title,
+        ...(document.description ? { description: document.description } : {}),
+        path: capsuleDocumentPath(document),
+      })),
     },
     null,
     2,
@@ -45,24 +63,44 @@ export function buildContextDocument(context: CapsuleContext): string {
  * rather than replacing them, so their words stay first.
  */
 export function buildContextCatalog(context: CapsuleContext): string {
-  if (context.metadata.length === 0) {
+  if (context.metadata.length === 0 && context.documents.length === 0) {
     return "";
   }
-  const lines = [
-    "## Workspace context",
-    "",
-    "Non-secret facts about this workspace and target.",
-    "",
-  ];
-  for (const entry of context.metadata) {
-    const name = entry.label ? `${entry.label} (\`${entry.key}\`)` : `\`${entry.key}\``;
-    lines.push(`- ${name}: ${entry.value}`);
+  const lines: string[] = [];
+
+  if (context.metadata.length > 0) {
+    lines.push("## Workspace context", "", "Non-secret facts about this workspace and target.", "");
+    for (const entry of context.metadata) {
+      const name = entry.label ? `${entry.label} (\`${entry.key}\`)` : `\`${entry.key}\``;
+      lines.push(`- ${name}: ${entry.value}`);
+    }
+    lines.push(
+      "",
+      `The same values are available as JSON at \`$${CONTEXT_DIRECTORY_VARIABLE}/${CONTEXT_FILE}\`.`,
+      "",
+    );
   }
-  lines.push(
-    "",
-    `The same values are available as JSON at \`$${CONTEXT_DIRECTORY_VARIABLE}/${CONTEXT_FILE}\`.`,
-    "",
-  );
+
+  if (context.documents.length > 0) {
+    // Listed, never inlined. The description is what lets the agent decide
+    // whether a document is worth opening, so it is the only part that costs
+    // context on every turn.
+    lines.push(
+      "## Workspace documents",
+      "",
+      "Reference material for this workspace. Read one when it is relevant;",
+      "the contents are not included here.",
+      "",
+    );
+    for (const document of context.documents) {
+      const description = document.description ? ` — ${document.description}` : "";
+      lines.push(
+        `- **${document.title}**${description}: \`$${CONTEXT_DIRECTORY_VARIABLE}/${capsuleDocumentPath(document)}\``,
+      );
+    }
+    lines.push("");
+  }
+
   return lines.join("\n");
 }
 
@@ -91,4 +129,18 @@ export async function writeCapsuleContext(
     encoding: "utf8",
     mode: 0o600,
   });
+
+  if (context.documents.length === 0) {
+    return;
+  }
+  const documentsDirectory = join(directory, DOCUMENTS_DIRECTORY);
+  await mkdir(documentsDirectory, { recursive: true, mode: 0o700 });
+  for (const document of context.documents) {
+    // Copied in, and read-only: reference material is not the agent's to
+    // edit, and a capsule must not be able to rewrite what the next one is
+    // told. The workspace keeps the authoritative copy.
+    const destination = join(documentsDirectory, basename(document.path));
+    await copyFile(document.path, destination);
+    await chmod(destination, 0o400);
+  }
 }

@@ -359,9 +359,13 @@ export async function createWorkspaceRuntime(
   const sandboxConfig = join(root, "sandbox.json");
   // Instructions now carry the generated context catalog, so a workspace with
   // metadata but no written instructions still gets a file.
+  const capsuleContext = {
+    metadata: resolvedTarget.metadata,
+    documents: resolvedTarget.documents,
+  };
   const instructionsBody = composeAgentInstructions(
     resolvedTarget.workspace.manifest.agentInstructions,
-    { metadata: resolvedTarget.metadata },
+    capsuleContext,
   );
   const agentInstructions = instructionsBody
     ? join(root, "agent-instructions.md")
@@ -420,9 +424,7 @@ export async function createWorkspaceRuntime(
       mode: 0o600,
     });
   }
-  await writeCapsuleContext(contextDirectory, {
-    metadata: resolvedTarget.metadata,
-  });
+  await writeCapsuleContext(contextDirectory, capsuleContext);
   if (brokerHelper && brokerSocket) {
     await writeBrokerHelper(brokerHelper, brokerSocket);
   }

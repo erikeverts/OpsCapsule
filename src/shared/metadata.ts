@@ -70,17 +70,50 @@ export const metadataEntrySchema = z.preprocess(
 export type MetadataEntry = z.infer<typeof metadataEntrySchema>;
 
 /**
- * Everything a workspace or target knows that is not configuration: facts now,
- * and reference documents later. Named for what it becomes rather than what it
- * currently holds, because the capsule receives it as one context surface and
- * adding documents should not move metadata.
+ * Reference material: runbooks, architecture notes, statements of work.
+ *
+ * Unlike metadata, a document is never inlined into the agent's instructions.
+ * It is listed in the catalog with enough description for the agent to decide
+ * whether to open it, and read from the capsule on demand. A runbook cannot go
+ * in every prompt.
+ */
+export const DOCUMENT_LIMIT = 20;
+
+/** Large enough for a long runbook, small enough to stay a reference. */
+export const DOCUMENT_BYTE_LIMIT = 1_000_000;
+
+export const documentSchema = z
+  .object({
+    id: z
+      .string()
+      .min(1)
+      .max(64)
+      .regex(
+        /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
+        "Identifiers use lowercase letters, digits, and single hyphens.",
+      ),
+    title: z.string().min(1).max(200),
+    /** What it covers, so the agent can decide whether to open it. */
+    description: z.string().min(1).max(500).optional(),
+    /** Workspace-relative once imported; absolute while being selected. */
+    source: z.string().min(1),
+  })
+  .strict();
+
+export type ContextDocument = z.infer<typeof documentSchema>;
+
+/**
+ * Everything a workspace or target knows that is not configuration: facts and
+ * reference documents. The capsule receives it as one context surface, so
+ * neither has to move when the other changes.
  */
 export const workspaceContextSchema = z
   .object({
     metadata: z.array(metadataEntrySchema).default([]),
+    documents: z.array(documentSchema).default([]),
   })
   .strict()
-  .default({ metadata: [] });
+  .default({ metadata: [], documents: [] });
 
 export type WorkspaceContext = z.infer<typeof workspaceContextSchema>;
 
@@ -99,6 +132,21 @@ export function resolveMetadata(
   }
   for (const entry of target) {
     merged.set(entry.key, entry);
+  }
+  return [...merged.values()];
+}
+
+/** Target documents replace workspace documents with the same id. */
+export function resolveDocuments(
+  workspace: readonly ContextDocument[],
+  target: readonly ContextDocument[],
+): ContextDocument[] {
+  const merged = new Map<string, ContextDocument>();
+  for (const document of workspace) {
+    merged.set(document.id, document);
+  }
+  for (const document of target) {
+    merged.set(document.id, document);
   }
   return [...merged.values()];
 }

@@ -102,7 +102,7 @@ describe("guard rails", () => {
     ).toEqual(["api-key", "db-password"]);
   });
 
-  const manifest = (context: object, targetContext: object = { metadata: [] }) => ({
+  const manifest = (context: object, targetContext: object = { metadata: [], documents: [] }) => ({
     apiVersion: "opscapsule.dev/v1alpha1",
     kind: "Workspace",
     metadata: { id: "atlas", name: "Atlas" },
@@ -193,7 +193,7 @@ describe("capsule context", () => {
   ];
 
   it("inlines values in the catalog so the agent needs no tool call", () => {
-    const catalog = buildContextCatalog({ metadata });
+    const catalog = buildContextCatalog({ metadata, documents: [] });
     expect(catalog).toContain("project-code");
     expect(catalog).toContain("DIP-1234");
     // Labelled entries keep the key visible: the agent may be asked about
@@ -204,32 +204,30 @@ describe("capsule context", () => {
   });
 
   it("writes nothing into the catalog when there is no metadata", () => {
-    expect(buildContextCatalog({ metadata: [] })).toBe("");
+    expect(buildContextCatalog({ metadata: [], documents: [] })).toBe("");
   });
 
   it("keeps the written instructions first and appends the catalog", () => {
-    const composed = composeAgentInstructions("# Rules\n\nBe careful.", {
-      metadata,
-    });
+    const composed = composeAgentInstructions("# Rules\n\nBe careful.", { metadata, documents: [] });
     expect(composed!.indexOf("Be careful")).toBeLessThan(
       composed!.indexOf("## Workspace context"),
     );
   });
 
   it("still produces instructions when only metadata exists", () => {
-    expect(composeAgentInstructions(undefined, { metadata })).toContain(
+    expect(composeAgentInstructions(undefined, { metadata, documents: [] })).toContain(
       "## Workspace context",
     );
   });
 
   it("produces nothing when there is neither", () => {
     expect(
-      composeAgentInstructions(undefined, { metadata: [] }),
+      composeAgentInstructions(undefined, { metadata: [], documents: [] }),
     ).toBeUndefined();
   });
 
   it("writes a versioned document shaped for documents to be added", () => {
-    const document = JSON.parse(buildContextDocument({ metadata }));
+    const document = JSON.parse(buildContextDocument({ metadata, documents: [] }));
     expect(document.version).toBe(1);
     expect(document.metadata).toEqual([
       { key: "project-code", value: "DIP-1234", kind: "text" },
@@ -338,10 +336,10 @@ describe("target-specific entries", () => {
     expect(pinnedMetadata(resolved).map((e) => e.value)).toEqual([
       "https://argocd-dev.example.com",
     ]);
-    expect(buildContextCatalog({ metadata: resolved })).toContain(
+    expect(buildContextCatalog({ metadata: resolved, documents: [] })).toContain(
       "https://argocd-dev.example.com",
     );
-    expect(buildContextCatalog({ metadata: resolved })).not.toContain(
+    expect(buildContextCatalog({ metadata: resolved, documents: [] })).not.toContain(
       "https://argocd.example.com",
     );
   });

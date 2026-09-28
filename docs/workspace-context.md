@@ -5,8 +5,9 @@ is configured: a project code, a cost centre, the generated URL of an
 environment. It is given to the agent so you do not have to repeat it, and
 pinned entries appear in the sidebar so you do not have to go looking for them.
 
-Documents such as runbooks and architecture notes will join the same surface in
-a later slice; see [ADR 0005](adr/0005-managed-agent-profiles.md).
+It holds two kinds of thing, delivered differently because they behave
+differently: **facts**, which are small and almost always relevant, and
+**documents**, which are large and occasionally relevant.
 
 ## This is not a secret store
 
@@ -109,6 +110,59 @@ jq -r '.metadata[] | select(.key == "argocd") | .value' "$OPSCAPSULE_CONTEXT/con
 
 Context is data. It grants no filesystem or network access, and nothing in it
 can widen a capsule's isolation.
+
+## Documents
+
+Runbooks, architecture notes, statements of work. Attach one in Workspace
+Studio under **Context → Documents**, or declare it in the manifest:
+
+```yaml
+context:
+  documents:
+    - id: incident-runbook
+      title: Incident runbook
+      description: What to do when the ingest pipeline stalls
+      source: /Users/you/docs/runbook.md
+```
+
+On save the file is copied into the workspace, and `source` is rewritten to the
+managed copy. The workspace holds its own snapshot, so a capsule never reaches
+into wherever the original lives, and moving or deleting the original cannot
+change what a target has already been given. Re-attach the file to pick up
+changes.
+
+A target may attach its own documents, and an identifier matching a workspace
+document replaces it for that target — a production runbook in place of the
+general one.
+
+### What the agent receives
+
+The catalog lists documents; it never includes them.
+
+```markdown
+## Workspace documents
+
+Reference material for this workspace. Read one when it is relevant;
+the contents are not included here.
+
+- **Incident runbook** — What to do when the ingest pipeline stalls: `$OPSCAPSULE_CONTEXT/documents/incident-runbook.md`
+```
+
+The **description** is the only part of a document that costs context on every
+turn, and it is what the agent uses to decide whether opening the file is worth
+it. A document with a vague description is one the agent will not open.
+
+Documents are delivered into the capsule read-only. Reference material is not
+the agent's to edit, and a capsule must not be able to rewrite what the next
+one is told.
+
+| Limit | Value |
+| --- | --- |
+| Documents resolved per target | 20 |
+| Size of one document | 1 MB |
+
+The size limit is deliberate: reference material that no longer fits is
+probably something to link to rather than attach.
 
 ## Pinned entries
 

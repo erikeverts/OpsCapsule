@@ -9,8 +9,10 @@ import type {
 } from "../../../shared/contracts";
 import type { CredentialStatus } from "../../../shared/credentials";
 import {
+  DOCUMENT_LIMIT,
   isLinkValue,
   METADATA_ENTRY_LIMIT,
+  type ContextDocument,
   type MetadataEntry,
 } from "../../../shared/metadata";
 import {
@@ -94,7 +96,7 @@ function blankWorkspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
-    context: { metadata: [] },
+    context: { metadata: [], documents: [] },
     credentials: [],
     cloudConnections: [],
     kubernetesContexts: [],
@@ -114,7 +116,7 @@ function blankWorkspace(): WorkspaceManifest {
         risk: "development",
         directories: ["workspace"],
         defaultDirectory: "workspace",
-        context: { metadata: [] },
+        context: { metadata: [], documents: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -430,6 +432,131 @@ function MetadataRows({
         <p className="field-hint">
           A target can resolve at most {limit} entries, because every one of
           them is given to the agent on every turn.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Documents are attached by picking a file, which the workspace then keeps its
+ * own copy of. The description is the only part the agent sees on every turn,
+ * so it is the field that decides whether a document ever gets opened.
+ */
+function DocumentRows({
+  documents,
+  limit,
+  onBrowse,
+  onChange,
+}: {
+  documents: ContextDocument[];
+  limit?: number;
+  onBrowse: (apply: (path: string) => void) => void;
+  onChange: (mutate: (next: ContextDocument[]) => void) => void;
+}) {
+  const atLimit = limit !== undefined && documents.length >= limit;
+  return (
+    <div className="studio-stack">
+      {documents.map((document, index) => (
+        <article className="studio-card" key={index}>
+          <div className="resource-card-header">
+            <div>
+              <strong>{document.title || "New document"}</strong>
+              <div className="field-hint">
+                <code className="path-value">{document.source}</code>
+              </div>
+            </div>
+            <button
+              className="text-button danger"
+              onClick={() => onChange((next) => next.splice(index, 1))}
+              type="button"
+            >
+              Remove
+            </button>
+          </div>
+
+          <Field label="Title">
+            <input
+              placeholder="Incident runbook"
+              value={document.title}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.title = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <Field
+            label="Description"
+            hint="How the agent decides whether this is worth opening. The contents are never put in the prompt."
+          >
+            <input
+              placeholder="What to do when the ingest pipeline stalls"
+              value={document.description ?? ""}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.description = event.target.value || undefined;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Identifier">
+            <input
+              placeholder="incident-runbook"
+              value={document.id}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.id = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <button
+            className="small-button"
+            onClick={() =>
+              onBrowse((path) =>
+                onChange((next) => {
+                  next[index]!.source = path;
+                }),
+              )
+            }
+            type="button"
+          >
+            Replace file…
+          </button>
+        </article>
+      ))}
+
+      <button
+        className="secondary-button"
+        disabled={atLimit}
+        onClick={() =>
+          onBrowse((path) =>
+            onChange((next) => {
+              const name = path.split("/").pop() ?? "document";
+              const base = name.replace(/\.[^.]*$/, "");
+              next.push({
+                id: uniqueIdentifier(
+                  identifierFromName(base) || "document",
+                  next.map((entry) => entry.id),
+                ),
+                title: base,
+                source: path,
+              });
+            }),
+          )
+        }
+        type="button"
+      >
+        Attach document…
+      </button>
+      {atLimit ? (
+        <p className="field-hint">
+          A target can resolve at most {limit} documents, because each one is
+          listed to the agent on every turn.
         </p>
       ) : null}
     </div>
@@ -2432,6 +2559,19 @@ export function WorkspaceEditor({
                   updateDraft((next) => mutate(next.context.metadata))
                 }
               />
+
+              <EditorSectionHeader
+                title="Documents"
+                description="Runbooks, architecture notes, statements of work. The agent is told what each one covers and reads it when relevant; the contents never go in the prompt."
+              />
+              <DocumentRows
+                documents={draft.context.documents}
+                limit={DOCUMENT_LIMIT}
+                onBrowse={(apply) => void browsePath("file", apply)}
+                onChange={(mutate) =>
+                  updateDraft((next) => mutate(next.context.documents))
+                }
+              />
             </>
           ) : null}
 
@@ -2472,7 +2612,7 @@ export function WorkspaceEditor({
                                     args: [],
                                   },
                                 }),
-                          context: { metadata: [] },
+                          context: { metadata: [], documents: [] },
                           isolation: {
                             mode: "enforced",
                             network: { mode: "public", allowedDomains: [] },
@@ -2630,6 +2770,23 @@ export function WorkspaceEditor({
                           onChange={(mutate) =>
                             updateDraft((next) =>
                               mutate(next.targets[index]!.context.metadata),
+                            )
+                          }
+                        />
+
+                        <span className="studio-subsection-label">
+                          Documents for this target
+                        </span>
+                        <p className="field-hint">
+                          Added for this target alone. An identifier matching a
+                          workspace document replaces it here.
+                        </p>
+                        <DocumentRows
+                          documents={target.context.documents}
+                          onBrowse={(apply) => void browsePath("file", apply)}
+                          onChange={(mutate) =>
+                            updateDraft((next) =>
+                              mutate(next.targets[index]!.context.documents),
                             )
                           }
                         />
