@@ -284,13 +284,19 @@ function Field({
 function MetadataRows({
   entries,
   limit,
+  inheritable,
   onChange,
 }: {
   entries: MetadataEntry[];
   limit?: number;
+  /** Workspace entries this level may override, offered prefilled. */
+  inheritable?: MetadataEntry[];
   onChange: (mutate: (next: MetadataEntry[]) => void) => void;
 }) {
   const atLimit = limit !== undefined && entries.length >= limit;
+  const overridable = (inheritable ?? []).filter(
+    (candidate) => !entries.some((entry) => entry.key === candidate.key),
+  );
   return (
     <div className="studio-stack">
       {entries.map((entry, index) => (
@@ -379,18 +385,47 @@ function MetadataRows({
         </article>
       ))}
 
-      <button
-        className="secondary-button"
-        disabled={atLimit}
-        onClick={() =>
-          onChange((next) => {
-            next.push({ key: "", value: "", pinned: false });
-          })
-        }
-        type="button"
-      >
-        Add entry
-      </button>
+      <div className="metadata-actions">
+        <button
+          className="secondary-button"
+          disabled={atLimit}
+          onClick={() =>
+            onChange((next) => {
+              next.push({ key: "", value: "", pinned: false });
+            })
+          }
+          type="button"
+        >
+          Add entry
+        </button>
+
+        {overridable.length > 0 ? (
+          <select
+            onChange={(event) => {
+              const source = overridable.find(
+                (candidate) => candidate.key === event.target.value,
+              );
+              if (!source) {
+                return;
+              }
+              // Prefilled from the workspace entry: an override usually only
+              // changes the value, and retyping the label and the pin is
+              // exactly the sort of duplication that drifts apart.
+              onChange((next) => {
+                next.push({ ...source });
+              });
+            }}
+            value=""
+          >
+            <option value="">Override a workspace entry…</option>
+            {overridable.map((candidate) => (
+              <option key={candidate.key} value={candidate.key}>
+                {candidate.label ?? candidate.key}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
       {atLimit ? (
         <p className="field-hint">
           A target can resolve at most {limit} entries, because every one of
@@ -2579,19 +2614,26 @@ export function WorkspaceEditor({
                             ))}
                         </select>
                       </Field>
-                      <Field
-                        label="Context overrides"
-                        hint="Entries with the same key replace the workspace value for this target, which is how one key can hold a different URL per environment."
-                      >
+                      <div className="studio-subsection">
+                        <span className="studio-subsection-label">
+                          Context overrides
+                        </span>
+                        <p className="field-hint">
+                          An entry with the same key as a workspace entry
+                          replaces it for this target, which is how one key
+                          holds a different URL per environment. A key that
+                          exists only here is added for this target alone.
+                        </p>
                         <MetadataRows
                           entries={target.context.metadata}
+                          inheritable={draft.context.metadata}
                           onChange={(mutate) =>
                             updateDraft((next) =>
                               mutate(next.targets[index]!.context.metadata),
                             )
                           }
                         />
-                      </Field>
+                      </div>
                       <Field label="Kubernetes context">
                         <select
                           value={target.kubernetesContext ?? ""}

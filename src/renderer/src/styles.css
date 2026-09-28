@@ -1635,3 +1635,21 @@ a {
 .checkbox-field .field-hint {
   display: block;
 }
+
+.studio-subsection {
+  margin-top: 16px;
+}
+
+.studio-subsection-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #c9ced6;
+}
+
+.metadata-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

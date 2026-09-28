@@ -286,3 +286,63 @@ describe("opening a pinned link", () => {
     expect(() => guard("argocd.example.com")).toThrow(/not a valid URL/);
   });
 });
+
+describe("target-specific entries", () => {
+  const workspace = [
+    entry("project-code", "DIP-1234"),
+    entry("argocd", "https://argocd.example.com", { label: "ArgoCD", pinned: true }),
+  ];
+
+  it("adds a key that exists only on the target", () => {
+    // Not every target entry is an override: a cluster dashboard may exist
+    // for one environment and nowhere else.
+    const resolved = resolveMetadata(workspace, [
+      entry("grafana", "https://grafana-dev.example.com", { pinned: true }),
+    ]);
+    expect(resolved.map((e) => e.key).sort()).toEqual([
+      "argocd",
+      "grafana",
+      "project-code",
+    ]);
+  });
+
+  it("replaces the whole entry, so an override carries its own label and pin", () => {
+    const resolved = resolveMetadata(workspace, [
+      entry("argocd", "https://argocd-dev.example.com"),
+    ]);
+    const argocd = resolved.find((e) => e.key === "argocd")!;
+    expect(argocd.value).toBe("https://argocd-dev.example.com");
+    // The editor prefills an override from the workspace entry for exactly
+    // this reason: omitting the label here would silently drop it.
+    expect(argocd.label).toBeUndefined();
+    expect(argocd.pinned).toBe(false);
+  });
+
+  it("keeps the label and pin when the override was prefilled", () => {
+    const source = workspace.find((e) => e.key === "argocd")!;
+    const resolved = resolveMetadata(workspace, [
+      { ...source, value: "https://argocd-dev.example.com" },
+    ]);
+    const argocd = resolved.find((e) => e.key === "argocd")!;
+    expect(argocd).toMatchObject({
+      label: "ArgoCD",
+      pinned: true,
+      value: "https://argocd-dev.example.com",
+    });
+  });
+
+  it("shows the target's value in the sidebar and to the agent", () => {
+    const resolved = resolveMetadata(workspace, [
+      { ...workspace[1]!, value: "https://argocd-dev.example.com" },
+    ]);
+    expect(pinnedMetadata(resolved).map((e) => e.value)).toEqual([
+      "https://argocd-dev.example.com",
+    ]);
+    expect(buildContextCatalog({ metadata: resolved })).toContain(
+      "https://argocd-dev.example.com",
+    );
+    expect(buildContextCatalog({ metadata: resolved })).not.toContain(
+      "https://argocd.example.com",
+    );
+  });
+});

@@ -50,9 +50,32 @@ or `https` value is opened in your browser; anything else is shown as text.
 Asking for the kind separately only created a way to get it wrong, and getting
 it wrong made an entry silently unclickable.
 
-A target entry replaces a workspace entry with the same key, which is what
-makes a per-environment URL one key rather than `argocd-dev` and `argocd-prod`
-living side by side.
+## Target-specific entries
+
+A target entry with the same key as a workspace entry **replaces it** for that
+target, which is what makes a per-environment URL one key rather than
+`argocd-dev` and `argocd-prod` living side by side. A key that appears only on
+a target is added for that target alone, which is the right shape for something
+that genuinely exists in one environment.
+
+Replacement is whole-entry, not field by field, so an override carries its own
+label and pin. Workspace Studio offers **Override a workspace entry** under
+each target, which adds the row prefilled from the workspace entry so only the
+value needs changing. Writing YAML by hand, repeat the fields you want to keep:
+
+```yaml
+targets:
+  - id: development
+    context:
+      metadata:
+        - key: argocd
+          label: ArgoCD      # repeated, or it is dropped for this target
+          value: https://argocd-ri-obs-dev.example.com
+          pinned: true
+```
+
+What the target resolves is what the sidebar shows and what the agent is given.
+The workspace value is not mentioned anywhere in the capsule.
 
 ## What the agent receives
 
