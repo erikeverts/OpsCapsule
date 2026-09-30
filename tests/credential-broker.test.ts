@@ -56,6 +56,7 @@ import {
   assertUsableSecret,
   credentialOverview,
   credentialStatuses,
+  sharedCredentialReferences,
   requireReference,
   storageContextFor,
 } from "../src/main/credentials/service.js";
@@ -1281,5 +1282,61 @@ describe("sidebar copy stays short", () => {
       "No profile selected",
       "Profile not found",
     ]);
+  });
+});
+
+describe("reusing a user identity in another workspace", () => {
+  const copilot = {
+    id: "copilot",
+    name: "GitHub Copilot",
+    kind: "provider-oauth" as const,
+    scope: "user" as const,
+    providerId: "opencode",
+    sourceProfile: "github-copilot",
+  };
+  const targetScoped = {
+    id: "prod-ops",
+    name: "Production",
+    kind: "aws-profile" as const,
+    scope: "target" as const,
+  };
+
+  const manifestWith = (id: string, credentials: object[]) =>
+    ({
+      metadata: { id, name: id },
+      credentials,
+      targets: [],
+    }) as unknown as Parameters<typeof credentialStatuses>[1];
+
+  it("offers user identities declared in any workspace", () => {
+    // The stored secret is shared, but the reference still has to be declared
+    // per manifest, so a new workspace had no way to select one.
+    const shared = sharedCredentialReferences([
+      manifestWith("ri-observability", [copilot, targetScoped]),
+      manifestWith("borealis", []),
+    ]);
+    expect(shared.map((entry) => entry.id)).toEqual(["copilot"]);
+  });
+
+  it("does not offer workspace or target scoped identities", () => {
+    // Those are deliberately bound to their boundary and are not reusable.
+    expect(
+      sharedCredentialReferences([manifestWith("atlas", [targetScoped])]),
+    ).toEqual([]);
+  });
+
+  it("lists an identity once even when several workspaces declare it", () => {
+    const shared = sharedCredentialReferences([
+      manifestWith("one", [copilot]),
+      manifestWith("two", [{ ...copilot, name: "Copilot (copy)" }]),
+    ]);
+    expect(shared).toHaveLength(1);
+  });
+
+  it("carries everything needed to redeclare it", () => {
+    const [shared] = sharedCredentialReferences([manifestWith("one", [copilot])]);
+    // Copying the declaration must be enough: the secret is already stored
+    // against this id at user scope, so it is authenticated once saved.
+    expect(shared).toEqual(copilot);
   });
 });

@@ -9,9 +9,14 @@ import {
   type CapsuleDocument,
 } from "../src/main/workspace-context.js";
 import {
+  documentSchema,
   DOCUMENT_LIMIT,
   resolveDocuments,
 } from "../src/shared/metadata.js";
+import {
+  identifierFromName,
+  uniqueIdentifier,
+} from "../src/shared/identifiers.js";
 
 const temporary: string[] = [];
 
@@ -122,5 +127,34 @@ describe("document resolution", () => {
 
   it("has a limit, because every document is listed on every turn", () => {
     expect(DOCUMENT_LIMIT).toBeGreaterThan(0);
+  });
+});
+
+describe("identifiers generated from real filenames", () => {
+  it("truncates rather than producing something the schema refuses", () => {
+    // Runbook filenames carry a document number, the full business unit name
+    // and more; refusing the attachment would be the wrong answer.
+    const name =
+      "DOC-00418271 Runbook Incident Response for the Regional Infrastructure and Observability Business Unit Production Environment";
+    const id = uniqueIdentifier(identifierFromName(name, "document"), []);
+
+    expect(id.length).toBeLessThanOrEqual(80);
+    expect(() => documentSchema.parse({ id, title: name, source: "/tmp/x.md" })).not.toThrow();
+  });
+
+  it("keeps generated identifiers unique after truncation", () => {
+    const name = "x".repeat(200);
+    const first = uniqueIdentifier(identifierFromName(name, "document"), []);
+    const second = uniqueIdentifier(identifierFromName(name, "document"), [first]);
+    expect(second).not.toBe(first);
+    expect(second.length).toBeLessThanOrEqual(80);
+    expect(() =>
+      documentSchema.parse({ id: second, title: "t", source: "/tmp/x.md" }),
+    ).not.toThrow();
+  });
+
+  it("keeps the full filename as the title", () => {
+    const name = "DOC-00418271 Runbook Incident Response";
+    expect(documentSchema.parse({ id: "doc", title: name, source: "/tmp/x.md" }).title).toBe(name);
   });
 });

@@ -43,6 +43,7 @@ import {
   assertUsableSecret,
   credentialOverview,
   credentialStatuses,
+  sharedCredentialReferences,
   readSecretFromFile,
   requireReference,
   storageContextFor,
@@ -234,6 +235,14 @@ function registerIpcHandlers(): void {
       workspaces.map(async ({ id }) => (await workspaceRegistry.document(id)).manifest),
     );
     return credentialOverview(credentialStoreFor(), manifests, selected);
+  });
+
+  ipcMain.handle(IPC.credentialShared, async () => {
+    const { workspaces } = await workspaceRegistry.catalog();
+    const manifests = await Promise.all(
+      workspaces.map(async ({ id }) => (await workspaceRegistry.document(id)).manifest),
+    );
+    return sharedCredentialReferences(manifests);
   });
 
   ipcMain.handle(IPC.credentialImport, async (_event, input: unknown) => {

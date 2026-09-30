@@ -1,5 +1,5 @@
 import { z } from "zod";
-import type { CredentialStatus } from "./credentials.js";
+import type { CredentialReference, CredentialStatus } from "./credentials.js";
 import type { MetadataEntry } from "./metadata.js";
 import type { WorkspaceManifest } from "./workspace-schema.js";
 
@@ -357,6 +357,11 @@ export interface OpsCapsuleApi {
     sourcePath?: string;
     secret?: string;
   }): Promise<CredentialStatus[]>;
+  /**
+   * User-scoped credential references declared in any workspace, offered so a
+   * new workspace can reuse an identity rather than redeclaring it by hand.
+   */
+  sharedCredentials(): Promise<CredentialReference[]>;
   /**
    * Runs the provider's interactive sign-in in the main process. Used by
    * AWS profiles, whose credentials are never stored by OpsCapsule.

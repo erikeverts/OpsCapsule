@@ -11,6 +11,7 @@ export const IPC = {
   checkTargetReadiness: "workspace:check-target-readiness",
   credentialStatus: "credential:status",
   credentialOverview: "credential:overview",
+  credentialShared: "credential:shared",
   credentialImport: "credential:import",
   credentialForget: "credential:forget",
   credentialAuthenticate: "credential:authenticate",

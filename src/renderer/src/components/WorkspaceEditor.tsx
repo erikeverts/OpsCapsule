@@ -7,7 +7,10 @@ import type {
   LocalResourceOptions,
   WorkspaceDocument,
 } from "../../../shared/contracts";
-import type { CredentialStatus } from "../../../shared/credentials";
+import type {
+  CredentialReference,
+  CredentialStatus,
+} from "../../../shared/credentials";
 import {
   DOCUMENT_LIMIT,
   isLinkValue,
@@ -539,11 +542,14 @@ function DocumentRows({
               const name = path.split("/").pop() ?? "document";
               const base = name.replace(/\.[^.]*$/, "");
               next.push({
+                // Real runbook filenames carry a document number, a full
+                // business unit name and more. The identifier is truncated to
+                // fit rather than refused; the title keeps the whole name.
                 id: uniqueIdentifier(
-                  identifierFromName(base) || "document",
+                  identifierFromName(base, "document"),
                   next.map((entry) => entry.id),
                 ),
-                title: base,
+                title: base.slice(0, 300),
                 source: path,
               });
             }),
@@ -602,6 +608,9 @@ export function WorkspaceEditor({
   const [credentialStatuses, setCredentialStatuses] = useState<
     CredentialStatus[]
   >([]);
+  const [sharedCredentials, setSharedCredentials] = useState<
+    CredentialReference[]
+  >([]);
   const [credentialBusy, setCredentialBusy] = useState<string | null>(null);
   const [credentialError, setCredentialError] = useState<string | null>(null);
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
@@ -623,6 +632,12 @@ export function WorkspaceEditor({
     if (mode !== "edit" || !workspaceId) {
       return;
     }
+    void window.opsCapsule
+      .sharedCredentials()
+      .then(setSharedCredentials)
+      .catch(() => {
+        // Reusing an identity is an offer, not a requirement.
+      });
     let cancelledStatuses = false;
     window.opsCapsule
       .credentialStatus(workspaceId)
@@ -766,6 +781,12 @@ export function WorkspaceEditor({
     [draft],
   );
   const dirty = draft ? yaml !== baselineYaml : false;
+
+  // Shared identities this workspace has not declared yet.
+  const reusableCredentials = sharedCredentials.filter(
+    (candidate) =>
+      !(draft?.credentials ?? []).some((entry) => entry.id === candidate.id),
+  );
 
   function cancel(): void {
     if (
@@ -2488,26 +2509,55 @@ export function WorkspaceEditor({
                   );
                 })}
 
-                <button
-                  className="secondary-button"
-                  onClick={() =>
-                    updateDraft((next) => {
-                      const id = uniqueIdentifier(
-                        "credential",
-                        next.credentials.map((entry) => entry.id),
-                      );
-                      next.credentials.push({
-                        id,
-                        name: "New credential",
-                        kind: "aws-profile",
-                        scope: "user",
-                      });
-                    })
-                  }
-                  type="button"
-                >
-                  Add credential
-                </button>
+                <div className="metadata-actions">
+                  <button
+                    className="secondary-button"
+                    onClick={() =>
+                      updateDraft((next) => {
+                        const id = uniqueIdentifier(
+                          "credential",
+                          next.credentials.map((entry) => entry.id),
+                        );
+                        next.credentials.push({
+                          id,
+                          name: "New credential",
+                          kind: "aws-profile",
+                          scope: "user",
+                        });
+                      })
+                    }
+                    type="button"
+                  >
+                    Add credential
+                  </button>
+
+                  {reusableCredentials.length > 0 ? (
+                    <select
+                      onChange={(event) => {
+                        const source = reusableCredentials.find(
+                          (candidate) => candidate.id === event.target.value,
+                        );
+                        if (!source) {
+                          return;
+                        }
+                        // The secret is already held for this id at user
+                        // scope, so copying the declaration is enough: it is
+                        // authenticated the moment it is saved.
+                        updateDraft((next) => {
+                          next.credentials.push({ ...source });
+                        });
+                      }}
+                      value=""
+                    >
+                      <option value="">Use an existing identity…</option>
+                      {reusableCredentials.map((candidate) => (
+                        <option key={candidate.id} value={candidate.id}>
+                          {candidate.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                </div>
               </div>
 
               <EditorSectionHeader

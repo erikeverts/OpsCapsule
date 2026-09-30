@@ -159,10 +159,16 @@ one is told.
 | Limit | Value |
 | --- | --- |
 | Documents resolved per target | 20 |
-| Size of one document | 1 MB |
+| Size of one document | 25 MB |
 
-The size limit is deliberate: reference material that no longer fits is
-probably something to link to rather than attach.
+Documents are referenced rather than inlined, so size costs disk and a copy at
+launch rather than context on every turn. Real runbooks are exported from wikis
+and carry images, and a tight limit would only push people back to pasting
+excerpts.
+
+Identifiers are generated from the filename and truncated to fit. Runbook names
+routinely carry a document number and a full business unit name; the identifier
+is shortened and the title keeps the whole thing.
 
 ## Pinned entries
 

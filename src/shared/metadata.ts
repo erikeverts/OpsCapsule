@@ -79,20 +79,28 @@ export type MetadataEntry = z.infer<typeof metadataEntrySchema>;
  */
 export const DOCUMENT_LIMIT = 20;
 
-/** Large enough for a long runbook, small enough to stay a reference. */
-export const DOCUMENT_BYTE_LIMIT = 1_000_000;
+/**
+ * Documents are referenced, not inlined, so size costs disk and a copy at
+ * launch rather than context on every turn. That makes a tight limit the wrong
+ * trade: real runbooks are exported from wikis and carry images, and refusing
+ * one for being large would push people back to pasting excerpts.
+ */
+export const DOCUMENT_BYTE_LIMIT = 25_000_000;
 
 export const documentSchema = z
   .object({
+    // Matches the identifier length used everywhere else in the manifest.
+    // Shorter here meant identifierFromName, which truncates to 80, could
+    // generate an id the schema then refused.
     id: z
       .string()
       .min(1)
-      .max(64)
+      .max(80)
       .regex(
         /^[a-z0-9]+(?:-[a-z0-9]+)*$/,
         "Identifiers use lowercase letters, digits, and single hyphens.",
       ),
-    title: z.string().min(1).max(200),
+    title: z.string().min(1).max(300),
     /** What it covers, so the agent can decide whether to open it. */
     description: z.string().min(1).max(500).optional(),
     /** Workspace-relative once imported; absolute while being selected. */
