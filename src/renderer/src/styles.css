@@ -1558,3 +1558,98 @@ a {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+.pinned-metadata {
+  margin-top: 18px;
+}
+
+.pinned-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Name and value are stacked. Side by side, a sidebar column left only a few
+   characters of the value visible, which is the one thing worth reading. */
+.pinned-link,
+.pinned-value {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  width: 100%;
+  padding: 5px 6px;
+  border: none;
+  border-radius: 6px;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+}
+
+.pinned-link {
+  cursor: pointer;
+}
+
+.pinned-link:hover {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.pinned-link .pinned-name {
+  color: #8ab4f8;
+}
+
+.pinned-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pinned-text {
+  color: #9aa0a6;
+  font-size: 12px;
+  /* Two lines before truncating: long URLs are common and one line of a
+     narrow column shows almost nothing. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+}
+
+.checkbox-field {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  margin-top: 10px;
+  font-size: 13px;
+}
+
+.checkbox-field input {
+  margin-top: 3px;
+}
+
+.checkbox-field .field-hint {
+  display: block;
+}
+
+.studio-subsection {
+  margin-top: 16px;
+}
+
+.studio-subsection-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 500;
+  color: #c9ced6;
+}
+
+.metadata-actions {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  flex-wrap: wrap;
+}

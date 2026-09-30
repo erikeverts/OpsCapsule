@@ -32,6 +32,13 @@ reused by every workspace and target, which is the expected shape for a central
 Bedrock account or a personal Copilot login. A `target`-scoped reference is
 partitioned per workspace and target so environments never share one.
 
+The stored secret is shared, but the *reference* still belongs to a manifest,
+which keeps a workspace self-contained rather than depending on another
+workspace's file. That is handled where the choice is made: the **inference
+credential** list includes identities signed in elsewhere under *Signed in
+elsewhere*, and selecting one declares it in this workspace as well. Because
+the secret is already held against that id, it is authenticated immediately.
+
 ## Two kinds of credential, two flows
 
 **AWS profiles store nothing.** An `aws-profile` reference names a profile that

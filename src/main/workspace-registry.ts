@@ -8,12 +8,14 @@ import {
   readdir,
   rename,
   rm,
+  stat,
   writeFile,
 } from "node:fs/promises";
 import { homedir } from "node:os";
 import {
   basename,
   dirname,
+  extname,
   isAbsolute,
   join,
   normalize,
@@ -38,6 +40,13 @@ import {
   type WorkspaceTarget,
 } from "../shared/workspace-schema.js";
 import type { CredentialReference } from "../shared/credentials.js";
+import {
+  DOCUMENT_BYTE_LIMIT,
+  resolveDocuments,
+  resolveMetadata,
+  type MetadataEntry,
+  type ContextDocument,
+} from "../shared/metadata.js";
 import { CloudAdapterRegistry } from "./cloud-adapters/registry.js";
 import { seedDefaultWorkspaces } from "./default-workspaces.js";
 import {
@@ -67,6 +76,9 @@ export interface ResolvedWorkspaceTarget {
     operational?: CredentialReference;
     inference?: CredentialReference;
   };
+  /** Workspace entries with the target's overrides applied. */
+  metadata: MetadataEntry[];
+  documents: Array<ContextDocument & { path: string }>;
   summary: WorkspaceTargetSummary;
 }
 
@@ -514,6 +526,63 @@ export class WorkspaceRegistry {
       authentication.configFile = relative(destinationRoot, destination);
     }
 
+    // Documents are snapshots, like managed agent configuration: the workspace
+    // keeps its own copy so a capsule never reaches into wherever the original
+    // lives, and so a moved or deleted original cannot change what a target
+    // has already been given.
+    for (const owner of [
+      { label: "workspace", context: manifest.context },
+      ...manifest.targets.map((target) => ({
+        label: `target '${target.id}'`,
+        context: target.context,
+      })),
+    ]) {
+      for (const document of owner.context.documents) {
+        const source = sourceManifest
+          ? resolveConfiguredPath(document.source, sourceManifest)
+          : isAbsolute(document.source)
+            ? normalize(document.source)
+            : undefined;
+        if (!source) {
+          throw new Error(
+            `Document '${document.id}' on ${owner.label} must be imported from an absolute path`,
+          );
+        }
+        const destination = join(
+          destinationRoot,
+          "resources",
+          "documents",
+          `${document.id}${extname(source).toLowerCase()}`,
+        );
+        if (normalize(source) !== normalize(destination)) {
+          const info = await stat(source);
+          if (!info.isFile()) {
+            throw new Error(`Document '${document.id}' is not a regular file`);
+          }
+          if (info.size > DOCUMENT_BYTE_LIMIT) {
+            throw new Error(
+              `Document '${document.id}' is larger than ${Math.round(
+                DOCUMENT_BYTE_LIMIT / 1000,
+              )} kB; reference material should stay a reference`,
+            );
+          }
+          await mkdir(dirname(destination), { recursive: true, mode: 0o700 });
+          const temporaryDestination = join(
+            dirname(destination),
+            `.${document.id}.${randomUUID()}.tmp`,
+          );
+          try {
+            await copyFile(source, temporaryDestination);
+            await chmod(temporaryDestination, 0o600);
+            await rename(temporaryDestination, destination);
+          } finally {
+            await rm(temporaryDestination, { force: true });
+          }
+        }
+        document.source = relative(destinationRoot, destination);
+      }
+    }
+
     for (const profile of manifest.agentProfiles) {
       const managedNames = new Set<string>();
       for (const file of profile.configuration.files) {
@@ -688,7 +757,20 @@ export class WorkspaceRegistry {
       inference: findCredential(workspace.manifest.inferenceCredential),
     };
 
+    const metadata = resolveMetadata(
+      workspace.manifest.context.metadata,
+      target.context.metadata,
+    );
+    const documents = resolveDocuments(
+      workspace.manifest.context.documents,
+      target.context.documents,
+    ).map((document) => ({
+      ...document,
+      path: resolveConfiguredPath(document.source, workspace.sourcePath),
+    }));
+
     const summary: WorkspaceTargetSummary = {
+      metadata,
       id: target.id,
       name: target.name,
       environment: target.environment,
@@ -724,6 +806,8 @@ export class WorkspaceRegistry {
       defaultDirectory,
       agent,
       credentials,
+      metadata,
+      documents,
       summary,
     };
   }

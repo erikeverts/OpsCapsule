@@ -7,7 +7,17 @@ import type {
   LocalResourceOptions,
   WorkspaceDocument,
 } from "../../../shared/contracts";
-import type { CredentialStatus } from "../../../shared/credentials";
+import type {
+  CredentialReference,
+  CredentialStatus,
+} from "../../../shared/credentials";
+import {
+  DOCUMENT_LIMIT,
+  isLinkValue,
+  METADATA_ENTRY_LIMIT,
+  type ContextDocument,
+  type MetadataEntry,
+} from "../../../shared/metadata";
 import {
   identifierFromName,
   uniqueIdentifier,
@@ -34,6 +44,7 @@ type EditorSection =
   | "kubernetes"
   | "agents"
   | "credentials"
+  | "context"
   | "targets";
 
 interface WorkspaceEditorProps {
@@ -65,6 +76,7 @@ const editorSections: Array<{
     label: "Credentials",
     description: "Identities and authentication",
   },
+  { id: "context", label: "Context", description: "Facts the agent should know" },
   { id: "targets", label: "Targets", description: "Operational environments" },
 ];
 
@@ -87,6 +99,7 @@ function blankWorkspace(): WorkspaceManifest {
       },
     ],
     defaultAgentProfile: "agent",
+    context: { metadata: [], documents: [] },
     credentials: [],
     cloudConnections: [],
     kubernetesContexts: [],
@@ -106,6 +119,7 @@ function blankWorkspace(): WorkspaceManifest {
         risk: "development",
         directories: ["workspace"],
         defaultDirectory: "workspace",
+        context: { metadata: [], documents: [] },
         isolation: {
           mode: "enforced",
           network: { mode: "public", allowedDomains: [] },
@@ -267,6 +281,294 @@ function Field({
   );
 }
 
+/**
+ * Metadata rows shared by the workspace section and each target, so the two
+ * behave identically and a target override looks like what it is: the same
+ * kind of row, with the same key.
+ */
+function MetadataRows({
+  entries,
+  limit,
+  inheritable,
+  onChange,
+}: {
+  entries: MetadataEntry[];
+  limit?: number;
+  /** Workspace entries this level may override, offered prefilled. */
+  inheritable?: MetadataEntry[];
+  onChange: (mutate: (next: MetadataEntry[]) => void) => void;
+}) {
+  const atLimit = limit !== undefined && entries.length >= limit;
+  const overridable = (inheritable ?? []).filter(
+    (candidate) => !entries.some((entry) => entry.key === candidate.key),
+  );
+  return (
+    <div className="studio-stack">
+      {entries.map((entry, index) => (
+        <article className="studio-card" key={index}>
+          <div className="resource-card-header">
+            <div>
+              <strong>{entry.label || entry.key || "New entry"}</strong>
+              {/* Only say something when there is something to say. A label
+                  reading "Text" on every row is noise. */}
+              {entry.pinned || isLinkValue(entry.value) ? (
+                <div className="field-hint">
+                  {[
+                    entry.pinned ? "Pinned" : undefined,
+                    isLinkValue(entry.value) ? "Opens in your browser" : undefined,
+                  ]
+                    .filter(Boolean)
+                    .join(" · ")}
+                </div>
+              ) : null}
+            </div>
+            <button
+              className="text-button danger"
+              onClick={() => onChange((next) => next.splice(index, 1))}
+              type="button"
+            >
+              Remove
+            </button>
+          </div>
+
+          <Field label="Key" hint="Used by the agent and in context.json.">
+            <input
+              placeholder="project-code"
+              value={entry.key}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.key = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Label">
+            <input
+              placeholder="Optional display name"
+              value={entry.label ?? ""}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.label = event.target.value || undefined;
+                })
+              }
+            />
+          </Field>
+
+          <Field
+            label="Value"
+            hint="An http or https value becomes a link you can open from the sidebar."
+          >
+            <input
+              value={entry.value}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.value = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <label className="checkbox-field">
+            <input
+              checked={entry.pinned}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.pinned = event.target.checked;
+                })
+              }
+              type="checkbox"
+            />
+            <span>
+              Pin for quick access
+              <span className="field-hint">
+                Shows it in the sidebar. The agent receives every entry either
+                way.
+              </span>
+            </span>
+          </label>
+        </article>
+      ))}
+
+      <div className="metadata-actions">
+        <button
+          className="secondary-button"
+          disabled={atLimit}
+          onClick={() =>
+            onChange((next) => {
+              next.push({ key: "", value: "", pinned: false });
+            })
+          }
+          type="button"
+        >
+          Add entry
+        </button>
+
+        {overridable.length > 0 ? (
+          <select
+            onChange={(event) => {
+              const source = overridable.find(
+                (candidate) => candidate.key === event.target.value,
+              );
+              if (!source) {
+                return;
+              }
+              // Prefilled from the workspace entry: an override usually only
+              // changes the value, and retyping the label and the pin is
+              // exactly the sort of duplication that drifts apart.
+              onChange((next) => {
+                next.push({ ...source });
+              });
+            }}
+            value=""
+          >
+            <option value="">Override a workspace entry…</option>
+            {overridable.map((candidate) => (
+              <option key={candidate.key} value={candidate.key}>
+                {candidate.label ?? candidate.key}
+              </option>
+            ))}
+          </select>
+        ) : null}
+      </div>
+      {atLimit ? (
+        <p className="field-hint">
+          A target can resolve at most {limit} entries, because every one of
+          them is given to the agent on every turn.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
+/**
+ * Documents are attached by picking a file, which the workspace then keeps its
+ * own copy of. The description is the only part the agent sees on every turn,
+ * so it is the field that decides whether a document ever gets opened.
+ */
+function DocumentRows({
+  documents,
+  limit,
+  onBrowse,
+  onChange,
+}: {
+  documents: ContextDocument[];
+  limit?: number;
+  onBrowse: (apply: (path: string) => void) => void;
+  onChange: (mutate: (next: ContextDocument[]) => void) => void;
+}) {
+  const atLimit = limit !== undefined && documents.length >= limit;
+  return (
+    <div className="studio-stack">
+      {documents.map((document, index) => (
+        <article className="studio-card" key={index}>
+          <div className="resource-card-header">
+            <div>
+              <strong>{document.title || "New document"}</strong>
+              <div className="field-hint">
+                <code className="path-value">{document.source}</code>
+              </div>
+            </div>
+            <button
+              className="text-button danger"
+              onClick={() => onChange((next) => next.splice(index, 1))}
+              type="button"
+            >
+              Remove
+            </button>
+          </div>
+
+          <Field label="Title">
+            <input
+              placeholder="Incident runbook"
+              value={document.title}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.title = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <Field
+            label="Description"
+            hint="How the agent decides whether this is worth opening. The contents are never put in the prompt."
+          >
+            <input
+              placeholder="What to do when the ingest pipeline stalls"
+              value={document.description ?? ""}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.description = event.target.value || undefined;
+                })
+              }
+            />
+          </Field>
+
+          <Field label="Identifier">
+            <input
+              placeholder="incident-runbook"
+              value={document.id}
+              onChange={(event) =>
+                onChange((next) => {
+                  next[index]!.id = event.target.value;
+                })
+              }
+            />
+          </Field>
+
+          <button
+            className="small-button"
+            onClick={() =>
+              onBrowse((path) =>
+                onChange((next) => {
+                  next[index]!.source = path;
+                }),
+              )
+            }
+            type="button"
+          >
+            Replace file…
+          </button>
+        </article>
+      ))}
+
+      <button
+        className="secondary-button"
+        disabled={atLimit}
+        onClick={() =>
+          onBrowse((path) =>
+            onChange((next) => {
+              const name = path.split("/").pop() ?? "document";
+              const base = name.replace(/\.[^.]*$/, "");
+              next.push({
+                // Real runbook filenames carry a document number, a full
+                // business unit name and more. The identifier is truncated to
+                // fit rather than refused; the title keeps the whole name.
+                id: uniqueIdentifier(
+                  identifierFromName(base, "document"),
+                  next.map((entry) => entry.id),
+                ),
+                title: base.slice(0, 300),
+                source: path,
+              });
+            }),
+          )
+        }
+        type="button"
+      >
+        Attach document…
+      </button>
+      {atLimit ? (
+        <p className="field-hint">
+          A target can resolve at most {limit} documents, because each one is
+          listed to the agent on every turn.
+        </p>
+      ) : null}
+    </div>
+  );
+}
+
 export function WorkspaceEditor({
   mode,
   workspaceId,
@@ -306,6 +608,9 @@ export function WorkspaceEditor({
   const [credentialStatuses, setCredentialStatuses] = useState<
     CredentialStatus[]
   >([]);
+  const [sharedCredentials, setSharedCredentials] = useState<
+    CredentialReference[]
+  >([]);
   const [credentialBusy, setCredentialBusy] = useState<string | null>(null);
   const [credentialError, setCredentialError] = useState<string | null>(null);
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
@@ -327,6 +632,12 @@ export function WorkspaceEditor({
     if (mode !== "edit" || !workspaceId) {
       return;
     }
+    void window.opsCapsule
+      .sharedCredentials()
+      .then(setSharedCredentials)
+      .catch(() => {
+        // Reusing an identity is an offer, not a requirement.
+      });
     let cancelledStatuses = false;
     window.opsCapsule
       .credentialStatus(workspaceId)
@@ -470,6 +781,12 @@ export function WorkspaceEditor({
     [draft],
   );
   const dirty = draft ? yaml !== baselineYaml : false;
+
+  // Shared identities this workspace has not declared yet.
+  const reusableCredentials = sharedCredentials.filter(
+    (candidate) =>
+      !(draft?.credentials ?? []).some((entry) => entry.id === candidate.id),
+  );
 
   function cancel(): void {
     if (
@@ -2219,13 +2536,33 @@ export function WorkspaceEditor({
                 description="Used only by the model provider. Keeping it separate from the target identity stops inference being billed to a customer account."
               />
               <div className="studio-card studio-fields">
-                <Field label="Inference credential">
+                <Field
+                  label="Inference credential"
+                  hint="An identity signed in elsewhere is added to this workspace when selected, and is authenticated already."
+                >
                   <select
                     value={draft.inferenceCredential ?? ""}
                     onChange={(event) =>
                       updateDraft((next) => {
-                        next.inferenceCredential =
-                          event.target.value || undefined;
+                        const selected = event.target.value;
+                        if (!selected) {
+                          next.inferenceCredential = undefined;
+                          return;
+                        }
+                        // Selecting one signed in elsewhere declares it here
+                        // too. The secret is already held against this id at
+                        // user scope, so nothing else is needed; the manifest
+                        // stays self-contained rather than referring to
+                        // another workspace.
+                        if (!next.credentials.some((entry) => entry.id === selected)) {
+                          const shared = reusableCredentials.find(
+                            (candidate) => candidate.id === selected,
+                          );
+                          if (shared) {
+                            next.credentials.push({ ...shared });
+                          }
+                        }
+                        next.inferenceCredential = selected;
                       })
                     }
                   >
@@ -2237,9 +2574,54 @@ export function WorkspaceEditor({
                         {credential.name}
                       </option>
                     ))}
+                    {reusableCredentials.length > 0 ? (
+                      <optgroup label="Signed in elsewhere">
+                        {reusableCredentials.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                   </select>
                 </Field>
               </div>
+            </>
+          ) : null}
+
+          {section === "context" ? (
+            <>
+              <EditorSectionHeader
+                title="Workspace context"
+                description="Non-secret facts shared by every target, given to the agent on every turn and available as JSON inside the capsule."
+              />
+              <div className="studio-card">
+                <p className="field-hint">
+                  This is not a secret store. Values are written to the
+                  manifest in plain text and handed to the agent, so anything
+                  confidential belongs in a credential.
+                </p>
+              </div>
+              <MetadataRows
+                entries={draft.context.metadata}
+                limit={METADATA_ENTRY_LIMIT}
+                onChange={(mutate) =>
+                  updateDraft((next) => mutate(next.context.metadata))
+                }
+              />
+
+              <EditorSectionHeader
+                title="Documents"
+                description="Runbooks, architecture notes, statements of work. The agent is told what each one covers and reads it when relevant; the contents never go in the prompt."
+              />
+              <DocumentRows
+                documents={draft.context.documents}
+                limit={DOCUMENT_LIMIT}
+                onBrowse={(apply) => void browsePath("file", apply)}
+                onChange={(mutate) =>
+                  updateDraft((next) => mutate(next.context.documents))
+                }
+              />
             </>
           ) : null}
 
@@ -2280,6 +2662,7 @@ export function WorkspaceEditor({
                                     args: [],
                                   },
                                 }),
+                          context: { metadata: [], documents: [] },
                           isolation: {
                             mode: "enforced",
                             network: { mode: "public", allowedDomains: [] },
@@ -2421,6 +2804,43 @@ export function WorkspaceEditor({
                             ))}
                         </select>
                       </Field>
+                      <div className="studio-subsection">
+                        <span className="studio-subsection-label">
+                          Context overrides
+                        </span>
+                        <p className="field-hint">
+                          An entry with the same key as a workspace entry
+                          replaces it for this target, which is how one key
+                          holds a different URL per environment. A key that
+                          exists only here is added for this target alone.
+                        </p>
+                        <MetadataRows
+                          entries={target.context.metadata}
+                          inheritable={draft.context.metadata}
+                          onChange={(mutate) =>
+                            updateDraft((next) =>
+                              mutate(next.targets[index]!.context.metadata),
+                            )
+                          }
+                        />
+
+                        <span className="studio-subsection-label">
+                          Documents for this target
+                        </span>
+                        <p className="field-hint">
+                          Added for this target alone. An identifier matching a
+                          workspace document replaces it here.
+                        </p>
+                        <DocumentRows
+                          documents={target.context.documents}
+                          onBrowse={(apply) => void browsePath("file", apply)}
+                          onChange={(mutate) =>
+                            updateDraft((next) =>
+                              mutate(next.targets[index]!.context.documents),
+                            )
+                          }
+                        />
+                      </div>
                       <Field label="Kubernetes context">
                         <select
                           value={target.kubernetesContext ?? ""}

@@ -1,5 +1,13 @@
 import { z } from "zod";
 import { credentialReferenceSchema } from "./credentials.js";
+import {
+  DOCUMENT_LIMIT,
+  METADATA_ENTRY_LIMIT,
+  resolveDocuments,
+  resolveMetadata,
+  secretLikeMetadataKeys,
+  workspaceContextSchema,
+} from "./metadata.js";
 
 const identifier = z
   .string()
@@ -229,6 +237,8 @@ export const targetSchema = z.object({
   agentRuntime: commandRuntimeSchema.optional(),
   /** Brokered operational identity. Stays the capsule's default AWS profile. */
   operationalCredential: identifier.optional(),
+  /** Overrides workspace context entries with the same key. */
+  context: workspaceContextSchema,
   isolation: z.object({
     mode: z.enum(["enforced", "context-only"]).default("enforced"),
     network: networkPolicySchema.default({
@@ -254,6 +264,11 @@ export const workspaceManifestSchema = z.object({
    * safe to show the renderer; secret material lives only in the OS-backed
    * credential store.
    */
+  /**
+   * Non-secret facts shared by every target, such as a project code or a cost
+   * centre. A target may override an entry by key.
+   */
+  context: workspaceContextSchema,
   credentials: z.array(credentialReferenceSchema).default([]),
   /**
    * The inference identity, used only by the model provider. Normally
@@ -273,6 +288,19 @@ export type CloudConnection = z.infer<typeof cloudConnectionSchema>;
 export type KubernetesContext = z.infer<typeof kubernetesContextSchema>;
 export type WorkspaceDirectory = z.infer<typeof directorySchema>;
 export type WorkspaceTarget = z.infer<typeof targetSchema>;
+
+function assertUniqueMetadataKeys(
+  entries: Array<{ key: string }>,
+  owner: string,
+): void {
+  const seen = new Set<string>();
+  for (const entry of entries) {
+    if (seen.has(entry.key)) {
+      throw new Error(`Duplicate metadata key '${entry.key}' on ${owner}`);
+    }
+    seen.add(entry.key);
+  }
+}
 
 function assertUniqueIds(
   values: Array<{ id: string }>,
@@ -305,6 +333,15 @@ export function validateWorkspaceReferences(
   const agentProfileIds = new Set(manifest.agentProfiles.map(({ id }) => id));
   const credentialIds = new Set(manifest.credentials.map(({ id }) => id));
 
+  assertUniqueIds(manifest.context.documents, "workspace document");
+  assertUniqueMetadataKeys(manifest.context.metadata, "workspace");
+  const workspaceSecretLike = secretLikeMetadataKeys(manifest.context.metadata);
+  if (workspaceSecretLike.length > 0) {
+    throw new Error(
+      `Workspace metadata must not hold secrets: ${workspaceSecretLike.join(", ")}`,
+    );
+  }
+
   if (
     manifest.inferenceCredential &&
     !credentialIds.has(manifest.inferenceCredential)
@@ -324,6 +361,34 @@ export function validateWorkspaceReferences(
   }
 
   for (const target of manifest.targets) {
+    assertUniqueIds(target.context.documents, `target '${target.id}' document`);
+    assertUniqueMetadataKeys(target.context.metadata, `target '${target.id}'`);
+    const targetSecretLike = secretLikeMetadataKeys(target.context.metadata);
+    if (targetSecretLike.length > 0) {
+      throw new Error(
+        `Target '${target.id}' metadata must not hold secrets: ${targetSecretLike.join(", ")}`,
+      );
+    }
+    // The limit applies to what a target actually ends up with, because that
+    // is what is given to the agent on every turn.
+    const effective = resolveMetadata(
+      manifest.context.metadata,
+      target.context.metadata,
+    );
+    if (effective.length > METADATA_ENTRY_LIMIT) {
+      throw new Error(
+        `Target '${target.id}' resolves ${effective.length} metadata entries, more than the limit of ${METADATA_ENTRY_LIMIT}`,
+      );
+    }
+    const resolvedDocuments = resolveDocuments(
+      manifest.context.documents,
+      target.context.documents,
+    );
+    if (resolvedDocuments.length > DOCUMENT_LIMIT) {
+      throw new Error(
+        `Target '${target.id}' resolves ${resolvedDocuments.length} documents, more than the limit of ${DOCUMENT_LIMIT}`,
+      );
+    }
     if (target.agentProfile && !agentProfileIds.has(target.agentProfile)) {
       throw new Error(
         `Target '${target.id}' references unknown agent profile '${target.agentProfile}'`,

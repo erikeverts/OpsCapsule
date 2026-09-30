@@ -31,10 +31,12 @@ const api: OpsCapsuleApi = {
     ipcRenderer.invoke(IPC.credentialStatus, { workspaceId }),
   credentialOverview: (input) =>
     ipcRenderer.invoke(IPC.credentialOverview, input),
+  sharedCredentials: () => ipcRenderer.invoke(IPC.credentialShared),
   importCredential: (input) => ipcRenderer.invoke(IPC.credentialImport, input),
   authenticateCredential: (input) =>
     ipcRenderer.invoke(IPC.credentialAuthenticate, input),
   forgetCredential: (input) => ipcRenderer.invoke(IPC.credentialForget, input),
+  openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, { url }),
   checkTargetReadiness: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.checkTargetReadiness, { workspaceId, targetId }),
   startWorkspace: (workspaceId, targetId) =>
