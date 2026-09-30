@@ -7,8 +7,14 @@ import type {
   TargetReadinessReport,
 } from "../../shared/contracts";
 import type { CredentialStatus } from "../../shared/credentials";
+import { pinnedMetadata } from "../../shared/metadata";
+import type { PreferencesState } from "../../shared/contracts";
+import type { ThemePreference } from "../../shared/preferences";
 import { TerminalPane } from "./components/TerminalPane";
 import { CredentialSidebar } from "./components/CredentialSidebar";
+import { BrandMark } from "./components/BrandMark";
+import { PinnedMetadata } from "./components/PinnedMetadata";
+import { PreferencesDialog } from "./components/PreferencesDialog";
 import { WorkspaceEditor } from "./components/WorkspaceEditor";
 
 type EditorRoute =
@@ -170,6 +176,8 @@ export function App() {
     target: CredentialStatus[];
   }>({ user: [], workspace: [], target: [] });
   const [credentialBusyId, setCredentialBusyId] = useState<string | null>(null);
+  const [preferences, setPreferences] = useState<PreferencesState | null>(null);
+  const [preferencesOpen, setPreferencesOpen] = useState(false);
   const [readiness, setReadiness] = useState<TargetReadinessReport | null>(null);
   const [readinessError, setReadinessError] = useState<string | null>(null);
 
@@ -229,6 +237,37 @@ export function App() {
       cancelled = true;
     };
   }, [selectedTarget, selectedWorkspace]);
+
+  // The theme is applied to the document element so every token switches at
+  // once, including anything rendered outside the React tree.
+  useEffect(() => {
+    if (preferences) {
+      document.documentElement.dataset.theme = preferences.resolvedTheme;
+    }
+  }, [preferences]);
+
+  useEffect(() => {
+    void window.opsCapsule.getPreferences().then(setPreferences);
+    // The menu lives in the main process, and the system appearance can change
+    // while the window is open.
+    const stopOpening = window.opsCapsule.onOpenPreferences(() =>
+      setPreferencesOpen(true),
+    );
+    const stopThemeChanges = window.opsCapsule.onThemeChanged(setPreferences);
+    return () => {
+      stopOpening();
+      stopThemeChanges();
+    };
+  }, []);
+
+  async function changeTheme(theme: ThemePreference): Promise<void> {
+    setPreferences(
+      await window.opsCapsule.savePreferences({
+        ...(preferences?.preferences ?? { theme }),
+        theme,
+      }),
+    );
+  }
 
   // Credential status is a file read, so refreshing is cheap. It is read on
   // selection change and whenever the window regains focus, which is when a
@@ -368,6 +407,13 @@ export function App() {
   }
 
   const production = selectedTarget?.risk === "production";
+  // Pinned entries follow the selected target, since a target may override a
+  // workspace entry such as a per-environment URL.
+  const pinnedEntries = useMemo(
+    () => pinnedMetadata(selectedTarget?.metadata ?? []),
+    [selectedTarget],
+  );
+
   const selectedWorkspaceRunning = selectedWorkspace
     ? Object.values(sessions).some(
         (session) => session.workspace.id === selectedWorkspace.id,
@@ -379,10 +425,17 @@ export function App() {
       className={`app-shell ${production && !editor ? "production-active" : ""}`}
     >
       <div className="window-drag-region" aria-hidden="true" />
+      {preferencesOpen && preferences ? (
+        <PreferencesDialog
+          onChange={(theme) => void changeTheme(theme)}
+          onClose={() => setPreferencesOpen(false)}
+          state={preferences}
+        />
+      ) : null}
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="./opscapsule-mark.svg" />
+            <BrandMark />
           </div>
           <div>
             <strong>OpsCapsule</strong>
@@ -407,6 +460,11 @@ export function App() {
         >
           <span>+</span> New workspace
         </button>
+
+        <PinnedMetadata
+          entries={pinnedEntries}
+          onError={(message) => setError(message)}
+        />
 
         <CredentialSidebar
           user={credentials.user}
