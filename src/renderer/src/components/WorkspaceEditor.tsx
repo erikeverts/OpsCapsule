@@ -2509,55 +2509,26 @@ export function WorkspaceEditor({
                   );
                 })}
 
-                <div className="metadata-actions">
-                  <button
-                    className="secondary-button"
-                    onClick={() =>
-                      updateDraft((next) => {
-                        const id = uniqueIdentifier(
-                          "credential",
-                          next.credentials.map((entry) => entry.id),
-                        );
-                        next.credentials.push({
-                          id,
-                          name: "New credential",
-                          kind: "aws-profile",
-                          scope: "user",
-                        });
-                      })
-                    }
-                    type="button"
-                  >
-                    Add credential
-                  </button>
-
-                  {reusableCredentials.length > 0 ? (
-                    <select
-                      onChange={(event) => {
-                        const source = reusableCredentials.find(
-                          (candidate) => candidate.id === event.target.value,
-                        );
-                        if (!source) {
-                          return;
-                        }
-                        // The secret is already held for this id at user
-                        // scope, so copying the declaration is enough: it is
-                        // authenticated the moment it is saved.
-                        updateDraft((next) => {
-                          next.credentials.push({ ...source });
-                        });
-                      }}
-                      value=""
-                    >
-                      <option value="">Use an existing identity…</option>
-                      {reusableCredentials.map((candidate) => (
-                        <option key={candidate.id} value={candidate.id}>
-                          {candidate.name}
-                        </option>
-                      ))}
-                    </select>
-                  ) : null}
-                </div>
+                <button
+                  className="secondary-button"
+                  onClick={() =>
+                    updateDraft((next) => {
+                      const id = uniqueIdentifier(
+                        "credential",
+                        next.credentials.map((entry) => entry.id),
+                      );
+                      next.credentials.push({
+                        id,
+                        name: "New credential",
+                        kind: "aws-profile",
+                        scope: "user",
+                      });
+                    })
+                  }
+                  type="button"
+                >
+                  Add credential
+                </button>
               </div>
 
               <EditorSectionHeader
@@ -2565,13 +2536,33 @@ export function WorkspaceEditor({
                 description="Used only by the model provider. Keeping it separate from the target identity stops inference being billed to a customer account."
               />
               <div className="studio-card studio-fields">
-                <Field label="Inference credential">
+                <Field
+                  label="Inference credential"
+                  hint="An identity signed in elsewhere is added to this workspace when selected, and is authenticated already."
+                >
                   <select
                     value={draft.inferenceCredential ?? ""}
                     onChange={(event) =>
                       updateDraft((next) => {
-                        next.inferenceCredential =
-                          event.target.value || undefined;
+                        const selected = event.target.value;
+                        if (!selected) {
+                          next.inferenceCredential = undefined;
+                          return;
+                        }
+                        // Selecting one signed in elsewhere declares it here
+                        // too. The secret is already held against this id at
+                        // user scope, so nothing else is needed; the manifest
+                        // stays self-contained rather than referring to
+                        // another workspace.
+                        if (!next.credentials.some((entry) => entry.id === selected)) {
+                          const shared = reusableCredentials.find(
+                            (candidate) => candidate.id === selected,
+                          );
+                          if (shared) {
+                            next.credentials.push({ ...shared });
+                          }
+                        }
+                        next.inferenceCredential = selected;
                       })
                     }
                   >
@@ -2583,6 +2574,15 @@ export function WorkspaceEditor({
                         {credential.name}
                       </option>
                     ))}
+                    {reusableCredentials.length > 0 ? (
+                      <optgroup label="Signed in elsewhere">
+                        {reusableCredentials.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>
+                            {candidate.name}
+                          </option>
+                        ))}
+                      </optgroup>
+                    ) : null}
                   </select>
                 </Field>
               </div>
