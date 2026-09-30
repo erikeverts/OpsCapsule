@@ -12,12 +12,14 @@ export interface SecretEncryptor {
   isEncryptionAvailable(): boolean;
   encryptString(plainText: string): Buffer;
   decryptString(encrypted: Buffer): string;
+  /** Explains why storage is refused, when it is. */
+  unavailableReason?(): string;
 }
 
 export class CredentialStorageUnavailableError extends Error {
-  constructor() {
+  constructor(detail?: string) {
     super(
-      "OS-backed encryption is unavailable, so credentials cannot be stored. " +
+      `${detail ?? "OS-backed encryption is unavailable, so credentials cannot be stored."} ` +
         "OpsCapsule refuses to fall back to plaintext.",
     );
     this.name = "CredentialStorageUnavailableError";
@@ -98,7 +100,9 @@ export class CredentialStore {
 
   private assertAvailable(): void {
     if (!this.encryptor.isEncryptionAvailable()) {
-      throw new CredentialStorageUnavailableError();
+      throw new CredentialStorageUnavailableError(
+        this.encryptor.unavailableReason?.(),
+      );
     }
   }
 

@@ -44,6 +44,7 @@ import { prepareIsolation } from "./isolation/prepare.js";
 import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
+import { createSecretEncryptor } from "./credentials/encryptor.js";
 import { CredentialStore, scopeContext } from "./credentials/store.js";
 import { readAgentLogin } from "./credentials/agent-logins.js";
 import { ssoLogin } from "./credentials/aws-profile.js";
@@ -243,7 +244,7 @@ function registerIpcHandlers(): void {
   });
 
   const credentialStoreFor = () =>
-    new CredentialStore(app.getPath("userData"), safeStorage);
+    new CredentialStore(app.getPath("userData"), createSecretEncryptor(safeStorage));
 
   ipcMain.handle(IPC.checkTargetReadiness, async (_event, input: unknown) => {
     const { workspaceId, targetId } = startWorkspaceInput.parse(input);
@@ -364,7 +365,7 @@ function registerIpcHandlers(): void {
     const sessionId = terminalManager.createSessionId();
     const credentialStore = new CredentialStore(
       app.getPath("userData"),
-      safeStorage,
+      createSecretEncryptor(safeStorage),
     );
     const credentialContext = {
       workspaceId: resolvedTarget.workspace.manifest.metadata.id,

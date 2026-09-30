@@ -7,6 +7,7 @@ import type {
   CredentialReference,
   CredentialScope,
 } from "../../shared/credentials.js";
+import { createSecretEncryptor } from "./encryptor.js";
 import { CredentialStore, scopeContext } from "./store.js";
 
 /**
@@ -129,10 +130,9 @@ async function main(): Promise<number> {
     return options.id ? 0 : 1;
   }
 
-  if (!safeStorage.isEncryptionAvailable()) {
-    console.error(
-      "OS-backed encryption is unavailable, so no credential can be stored.",
-    );
+  const encryptor = createSecretEncryptor(safeStorage);
+  if (!encryptor.isEncryptionAvailable()) {
+    console.error(encryptor.unavailableReason?.() ?? "Encryption is unavailable.");
     return 1;
   }
 
@@ -153,7 +153,7 @@ async function main(): Promise<number> {
     return 1;
   }
 
-  const store = new CredentialStore(app.getPath("userData"), safeStorage);
+  const store = new CredentialStore(app.getPath("userData"), encryptor);
   console.log(`Using ${app.getName()} data at ${app.getPath("userData")}`);
   const context = scopeContext(options.scope, {
     workspaceId: options.workspace ?? "",
