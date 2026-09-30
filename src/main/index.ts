@@ -6,6 +6,7 @@ import {
   dialog,
   ipcMain,
   net,
+  nativeTheme,
   protocol,
   safeStorage,
   shell,
@@ -20,6 +21,7 @@ import {
   credentialOverviewInput,
   credentialStatusInput,
   openExternalInput,
+  savePreferencesInput,
   deleteWorkspaceInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
@@ -32,6 +34,12 @@ import {
   workspaceDocumentInput,
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
+import { installApplicationMenu } from "./application-menu.js";
+import { PreferencesStore } from "./preferences.js";
+import {
+  preferencesSchema,
+  resolveTheme,
+} from "../shared/preferences.js";
 import { prepareIsolation } from "./isolation/prepare.js";
 import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
@@ -48,6 +56,7 @@ import {
   requireReference,
   storageContextFor,
 } from "./credentials/service.js";
+import type { PreferencesState } from "../shared/contracts.js";
 import type { CapsuleBroker } from "./terminal-manager.js";
 import {
   cleanupStaleWorkspaceRuntimes,
@@ -180,6 +189,41 @@ function registerIpcHandlers(): void {
   );
 
   ipcMain.handle(IPC.discoverLocalResources, () => discoverLocalResources());
+
+  const preferencesStore = new PreferencesStore(app.getPath("userData"));
+
+  const preferencesState = async (): Promise<PreferencesState> => {
+    const preferences = await preferencesStore.read();
+    return {
+      preferences,
+      resolvedTheme: resolveTheme(
+        preferences.theme,
+        nativeTheme.shouldUseDarkColors,
+      ),
+    };
+  };
+
+  ipcMain.handle(IPC.getPreferences, async () => {
+    // Applying the stored preference to nativeTheme keeps the native chrome,
+    // such as the title bar and system dialogs, in step with the window.
+    const { preferences } = await preferencesState();
+    nativeTheme.themeSource = preferences.theme;
+    return preferencesState();
+  });
+
+  ipcMain.handle(IPC.savePreferences, async (_event, input: unknown) => {
+    const { preferences } = savePreferencesInput.parse(input);
+    const saved = await preferencesStore.write(preferencesSchema.parse(preferences));
+    nativeTheme.themeSource = saved.theme;
+    return preferencesState();
+  });
+
+  // Following the system means reacting to it, not only reading it at launch.
+  nativeTheme.on("updated", () => {
+    void preferencesState().then((state) => {
+      mainWindow?.webContents.send(IPC.themeChanged, state);
+    });
+  });
 
   ipcMain.handle(IPC.openExternal, async (_event, input: unknown) => {
     const { url } = openExternalInput.parse(input);
@@ -395,6 +439,9 @@ function registerIpcHandlers(): void {
   });
 }
 
+/** Matches --bg-1 in each theme, so the window does not flash the wrong colour. */
+const windowBackground = { dark: "#0d161c", light: "#e7eef4" } as const;
+
 async function createWindow(show = true): Promise<void> {
   const applicationIcon = join(
     app.getAppPath(),
@@ -409,7 +456,13 @@ async function createWindow(show = true): Promise<void> {
     minWidth: 1000,
     minHeight: 650,
     show,
-    backgroundColor: "#0b1117",
+    backgroundColor:
+      windowBackground[
+        resolveTheme(
+          (await new PreferencesStore(app.getPath("userData")).read()).theme,
+          nativeTheme.shouldUseDarkColors,
+        )
+      ],
     icon: applicationIcon,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     webPreferences: {
@@ -455,6 +508,7 @@ void app
     workspaceRegistry = new WorkspaceRegistry(app.getPath("userData"));
     await workspaceRegistry.initialize();
     registerIpcHandlers();
+    installApplicationMenu(() => mainWindow);
     await createWindow(!isPackagedSmokeTest);
 
     if (isPackagedSmokeTest) {

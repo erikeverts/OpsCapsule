@@ -1,6 +1,13 @@
 import { z } from "zod";
 import type { CredentialReference, CredentialStatus } from "./credentials.js";
 import type { MetadataEntry } from "./metadata.js";
+import type { Preferences, ResolvedTheme } from "./preferences.js";
+
+/** Preferences plus what the theme currently resolves to. */
+export interface PreferencesState {
+  preferences: Preferences;
+  resolvedTheme: ResolvedTheme;
+}
 import type { WorkspaceManifest } from "./workspace-schema.js";
 
 export type PaneKind = "agent" | "shell";
@@ -295,6 +302,10 @@ export const credentialImportInput = z.object({
   secret: z.string().min(1).max(200_000).optional(),
 });
 
+export const savePreferencesInput = z.object({
+  preferences: z.unknown(),
+});
+
 export const openExternalInput = z.object({
   url: z.string().min(1).max(2048),
 });
@@ -378,6 +389,11 @@ export interface OpsCapsuleApi {
   }): Promise<CredentialStatus[]>;
   /** Opens a pinned link in the user's browser. Refuses anything but http(s). */
   openExternal(url: string): Promise<void>;
+  getPreferences(): Promise<PreferencesState>;
+  savePreferences(preferences: Preferences): Promise<PreferencesState>;
+  /** Fires when the menu asks for preferences, or the OS appearance changes. */
+  onOpenPreferences(listener: () => void): () => void;
+  onThemeChanged(listener: (state: PreferencesState) => void): () => void;
   checkTargetReadiness(
     workspaceId: string,
     targetId: string,

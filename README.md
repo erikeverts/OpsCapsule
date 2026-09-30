@@ -118,4 +118,5 @@ identities are described in
 [ADR 0007](docs/adr/0007-credential-broker-and-inference-identity.md), with
 setup and testing steps in [credentials](docs/credentials.md). Non-secret
 facts a workspace carries, and how they reach the agent, are described in
-[workspace context](docs/workspace-context.md).
+[workspace context](docs/workspace-context.md). Application settings, and how
+themes are defined, are described in [preferences](docs/preferences.md).
