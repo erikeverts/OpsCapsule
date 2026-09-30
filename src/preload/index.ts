@@ -5,6 +5,7 @@ import type {
   TerminalExitEvent,
 } from "../shared/contracts.js";
 import { IPC } from "../shared/ipc.js";
+import type { PreferencesState } from "../shared/contracts.js";
 
 const api: OpsCapsuleApi = {
   listWorkspaces: () => ipcRenderer.invoke(IPC.listWorkspaces),
@@ -31,10 +32,25 @@ const api: OpsCapsuleApi = {
     ipcRenderer.invoke(IPC.credentialStatus, { workspaceId }),
   credentialOverview: (input) =>
     ipcRenderer.invoke(IPC.credentialOverview, input),
+  sharedCredentials: () => ipcRenderer.invoke(IPC.credentialShared),
   importCredential: (input) => ipcRenderer.invoke(IPC.credentialImport, input),
   authenticateCredential: (input) =>
     ipcRenderer.invoke(IPC.credentialAuthenticate, input),
   forgetCredential: (input) => ipcRenderer.invoke(IPC.credentialForget, input),
+  openExternal: (url) => ipcRenderer.invoke(IPC.openExternal, { url }),
+  getPreferences: () => ipcRenderer.invoke(IPC.getPreferences),
+  savePreferences: (preferences) =>
+    ipcRenderer.invoke(IPC.savePreferences, { preferences }),
+  onOpenPreferences: (listener) => {
+    const handler = () => listener();
+    ipcRenderer.on(IPC.openPreferences, handler);
+    return () => ipcRenderer.removeListener(IPC.openPreferences, handler);
+  },
+  onThemeChanged: (listener) => {
+    const handler = (_event: unknown, state: PreferencesState) => listener(state);
+    ipcRenderer.on(IPC.themeChanged, handler);
+    return () => ipcRenderer.removeListener(IPC.themeChanged, handler);
+  },
   checkTargetReadiness: (workspaceId, targetId) =>
     ipcRenderer.invoke(IPC.checkTargetReadiness, { workspaceId, targetId }),
   startWorkspace: (workspaceId, targetId) =>

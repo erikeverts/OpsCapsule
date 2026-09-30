@@ -56,6 +56,7 @@ import {
   assertUsableSecret,
   credentialOverview,
   credentialStatuses,
+  sharedCredentialReferences,
   requireReference,
   storageContextFor,
 } from "../src/main/credentials/service.js";
@@ -1281,5 +1282,116 @@ describe("sidebar copy stays short", () => {
       "No profile selected",
       "Profile not found",
     ]);
+  });
+});
+
+describe("reusing a user identity in another workspace", () => {
+  const copilot = {
+    id: "copilot",
+    name: "GitHub Copilot",
+    kind: "provider-oauth" as const,
+    scope: "user" as const,
+    providerId: "opencode",
+    sourceProfile: "github-copilot",
+  };
+  const targetScoped = {
+    id: "prod-ops",
+    name: "Production",
+    kind: "aws-profile" as const,
+    scope: "target" as const,
+  };
+
+  const manifestWith = (id: string, credentials: object[]) =>
+    ({
+      metadata: { id, name: id },
+      credentials,
+      targets: [],
+    }) as unknown as Parameters<typeof credentialStatuses>[1];
+
+  it("offers user identities declared in any workspace", () => {
+    // The stored secret is shared, but the reference still has to be declared
+    // per manifest, so a new workspace had no way to select one.
+    const shared = sharedCredentialReferences([
+      manifestWith("ri-observability", [copilot, targetScoped]),
+      manifestWith("borealis", []),
+    ]);
+    expect(shared.map((entry) => entry.id)).toEqual(["copilot"]);
+  });
+
+  it("does not offer workspace or target scoped identities", () => {
+    // Those are deliberately bound to their boundary and are not reusable.
+    expect(
+      sharedCredentialReferences([manifestWith("atlas", [targetScoped])]),
+    ).toEqual([]);
+  });
+
+  it("lists an identity once even when several workspaces declare it", () => {
+    const shared = sharedCredentialReferences([
+      manifestWith("one", [copilot]),
+      manifestWith("two", [{ ...copilot, name: "Copilot (copy)" }]),
+    ]);
+    expect(shared).toHaveLength(1);
+  });
+
+  it("carries everything needed to redeclare it", () => {
+    const [shared] = sharedCredentialReferences([manifestWith("one", [copilot])]);
+    // Copying the declaration must be enough: the secret is already stored
+    // against this id at user scope, so it is authenticated once saved.
+    expect(shared).toEqual(copilot);
+  });
+});
+
+describe("selecting an identity signed in elsewhere", () => {
+  /**
+   * Mirrors what the inference dropdown does. Selecting a shared identity
+   * declares it in this workspace, because inferenceCredential must name a
+   * credential this manifest declares and a manifest should not depend on
+   * another workspace's file.
+   */
+  function selectInference(
+    manifest: { credentials: CredentialReference[]; inferenceCredential?: string },
+    shared: CredentialReference[],
+    selected: string,
+  ) {
+    if (!manifest.credentials.some((entry) => entry.id === selected)) {
+      const source = shared.find((candidate) => candidate.id === selected);
+      if (source) {
+        manifest.credentials.push({ ...source });
+      }
+    }
+    manifest.inferenceCredential = selected;
+    return manifest;
+  }
+
+  const copilot: CredentialReference = {
+    id: "copilot",
+    name: "GitHub Copilot",
+    kind: "provider-oauth",
+    scope: "user",
+    providerId: "opencode",
+    sourceProfile: "github-copilot",
+  };
+
+  it("declares a shared identity in the workspace that selects it", () => {
+    const manifest = selectInference({ credentials: [] }, [copilot], "copilot");
+    // Without this the selection fails validation: inferenceCredential must
+    // name something this manifest declares.
+    expect(manifest.credentials).toEqual([copilot]);
+    expect(manifest.inferenceCredential).toBe("copilot");
+  });
+
+  it("does not declare it twice when already present", () => {
+    const manifest = selectInference(
+      { credentials: [copilot] },
+      [copilot],
+      "copilot",
+    );
+    expect(manifest.credentials).toHaveLength(1);
+  });
+
+  it("keeps the manifest valid once declared", () => {
+    const manifest = selectInference({ credentials: [] }, [copilot], "copilot");
+    const ids = new Set(manifest.credentials.map((entry) => entry.id));
+    expect(ids.has(manifest.inferenceCredential!)).toBe(true);
   });
 });

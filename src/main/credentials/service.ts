@@ -184,6 +184,29 @@ export async function credentialOverview(
   return { user, workspace, target };
 }
 
+/**
+ * User-scoped credential references declared anywhere.
+ *
+ * The stored secret for a user-scoped credential is shared by every workspace,
+ * but the *reference* still has to be declared in each manifest, which keeps a
+ * workspace self-contained. Offering the existing declarations to copy is what
+ * makes "shared by every workspace" true in practice rather than only of the
+ * secret.
+ */
+export function sharedCredentialReferences(
+  manifests: readonly WorkspaceManifest[],
+): CredentialReference[] {
+  const shared = new Map<string, CredentialReference>();
+  for (const manifest of manifests) {
+    for (const reference of manifest.credentials) {
+      if (reference.scope === "user" && !shared.has(reference.id)) {
+        shared.set(reference.id, reference);
+      }
+    }
+  }
+  return [...shared.values()];
+}
+
 export function requireReference(
   manifest: WorkspaceManifest,
   referenceId: string,

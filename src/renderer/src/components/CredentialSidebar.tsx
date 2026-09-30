@@ -87,7 +87,14 @@ export function CredentialSidebar({
   const now = new Date(useTick(counting));
 
   const groups = [
-    { label: "Your identities", entries: user, hint: "Shared by every workspace" },
+    {
+      label: "Your identities",
+      entries: user,
+      // The secret is shared; the declaration still belongs to a workspace.
+      // Saying "shared by every workspace" read as though selecting one
+      // elsewhere would just work.
+      hint: "Signed in once, reusable by any workspace",
+    },
     { label: "Workspace identities", entries: workspace, hint: undefined },
     { label: "Target identities", entries: target, hint: undefined },
   ].filter((group) => group.entries.length > 0);
