@@ -87,8 +87,11 @@ module.exports = {
   },
   makers: [
     {
+      // Linux ships as a zip rather than a package: it is unpacked and run
+      // without root, which is what a WSL installation wants, and it avoids
+      // depending on dpkg or rpmbuild being present to build it.
       name: "@electron-forge/maker-zip",
-      platforms: ["darwin"],
+      platforms: ["darwin", "linux"],
     },
     {
       name: "@electron-forge/maker-dmg",

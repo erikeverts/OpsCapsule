@@ -16,6 +16,52 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  linux-x64:
+    name: Linux x64 build
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+
+      # The sandbox acceptance tests need ripgrep, and enforced isolation on
+      # Linux needs bwrap and socat at runtime. Installing them here keeps the
+      # build host honest about what a user will need.
+      - name: Install isolation runtime dependencies
+        run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
+
+      # Native modules are rebuilt for Electron's ABI, so this cannot be
+      # cross-built from another platform.
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm audit --omit=dev --audit-level=high
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Build distributables
+        run: npm run make
+
+      - name: Retain workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opscapsule-linux-x64
+          path: out/make/**/*.zip
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
   macos-arm64:
     name: macOS arm64 prerelease
     runs-on: macos-15
