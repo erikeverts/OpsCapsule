@@ -1310,10 +1310,12 @@ a {
   text-transform: uppercase;
 }
 
-.studio-field input:not([type="checkbox"]),
-.studio-field select,
-.studio-field textarea {
-  width: 100%;
+/* Controls are styled as controls, not by where they happen to sit. Scoping
+   this to .studio-field meant anything not wrapped in a Field fell back to the
+   browser's default, which is a white box in a dark interface. */
+select,
+textarea,
+input:not([type="checkbox"]):not([type="radio"]) {
   border: 1px solid var(--surface-3);
   border-radius: 7px;
   outline: none;
@@ -1322,10 +1324,16 @@ a {
   font: 11px "SFMono-Regular", Consolas, monospace;
 }
 
-.studio-field input:not([type="checkbox"]),
-.studio-field select {
+select,
+input:not([type="checkbox"]):not([type="radio"]) {
   height: 34px;
   padding: 0 9px;
+}
+
+.studio-field select,
+.studio-field textarea,
+.studio-field input:not([type="checkbox"]) {
+  width: 100%;
 }
 
 .studio-field textarea {
@@ -1335,15 +1343,15 @@ a {
   line-height: 1.45;
 }
 
-.studio-field input:focus,
-.studio-field select:focus,
-.studio-field textarea:focus {
+select:focus,
+textarea:focus,
+input:not([type="checkbox"]):not([type="radio"]):focus {
   border-color: var(--surface-5);
   box-shadow: 0 0 0 2px var(--tint-accent-1);
 }
 
-.studio-field input:disabled,
-.studio-field select:disabled {
+select:disabled,
+input:disabled:not([type="checkbox"]):not([type="radio"]) {
   color: var(--surface-6);
   cursor: not-allowed;
   background: var(--surface-1);
