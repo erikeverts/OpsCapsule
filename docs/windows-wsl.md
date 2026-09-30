@@ -51,6 +51,26 @@ unzip opscapsule-linux-x64.zip -d ~/opscapsule
 ~/opscapsule/OpsCapsule
 ```
 
+The build is **x86-64**. A Windows machine on ARM runs an ARM64 Linux under WSL
+and needs an ARM64 build, which is not produced yet.
+
+### If it refuses to start over the sandbox helper
+
+Electron ships `chrome-sandbox`, which it expects to be owned by root with the
+setuid bit. A zip cannot carry that, so the first run may fail with a message
+about the sandbox being configured incorrectly. Grant it:
+
+```bash
+sudo chown root:root ~/opscapsule/OpsCapsule/chrome-sandbox
+sudo chmod 4755 ~/opscapsule/OpsCapsule/chrome-sandbox
+```
+
+Starting with `--no-sandbox` also works and is the wrong way round. That
+switch disables Chromium's own process sandbox, which protects the interface
+from the web content it renders. It does not affect capsule isolation, which is
+enforced separately by bubblewrap, but it weakens the application and should
+not become the habit.
+
 ## Keep workspaces inside WSL
 
 Put workspace directories in the Linux filesystem, under `~`, not on a Windows
