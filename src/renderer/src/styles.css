@@ -199,7 +199,7 @@ a {
   flex: 0 0 auto;
 }
 
-.brand-mark img {
+.brand-mark svg {
   display: block;
   width: 100%;
   height: 100%;

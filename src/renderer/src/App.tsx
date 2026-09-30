@@ -12,6 +12,7 @@ import type { PreferencesState } from "../../shared/contracts";
 import type { ThemePreference } from "../../shared/preferences";
 import { TerminalPane } from "./components/TerminalPane";
 import { CredentialSidebar } from "./components/CredentialSidebar";
+import { BrandMark } from "./components/BrandMark";
 import { PinnedMetadata } from "./components/PinnedMetadata";
 import { PreferencesDialog } from "./components/PreferencesDialog";
 import { WorkspaceEditor } from "./components/WorkspaceEditor";
@@ -434,7 +435,7 @@ export function App() {
       <aside className="sidebar">
         <div className="brand">
           <div className="brand-mark">
-            <img alt="" src="./opscapsule-mark.svg" />
+            <BrandMark />
           </div>
           <div>
             <strong>OpsCapsule</strong>

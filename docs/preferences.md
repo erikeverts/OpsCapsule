@@ -30,8 +30,10 @@ applied to Electron's `nativeTheme`, so the title bar and system dialogs stay
 in step with the window, and the window's initial background matches the
 resolved theme so launching does not flash the wrong colour.
 
-This applies to OpsCapsule itself. Colours inside a terminal come from the
-programs running in the capsule.
+This applies to OpsCapsule itself. The terminal panes keep a dark palette in
+both themes: their colours are an xterm theme whose ANSI values assume a dark
+background, and inverting them would make output from programs inside the
+capsule harder to read rather than easier.
 
 ## Themes
 
