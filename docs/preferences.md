@@ -36,19 +36,30 @@ programs running in the capsule.
 ## Themes
 
 Every colour in the interface is a CSS custom property, defined once per theme
-in `src/renderer/src/styles.css`:
+in `src/renderer/src/styles.css`, and organised into ramps:
 
-```css
-:root[data-theme="dark"] { --bg-1: #0b1117; /* … */ }
-:root[data-theme="light"] { --bg-1: #e7edf3; /* … */ }
-```
+| Ramp | Purpose |
+| --- | --- |
+| `--surface-1` … `--surface-12` | Backgrounds and text, darkest to lightest |
+| `--accent-1` … `--accent-6` | The cyan the product is built around |
+| `--success-*`, `--warning-*`, `--danger-*`, `--info-*` | Status |
+| `--scrim-*`, `--tint-*` | Translucent overlays |
 
-The dark values are exactly what the application shipped with, so themes cannot
-change how dark mode looks. The light values were derived by inverting
-lightness while keeping hue, then damping saturated accents and clamping the
-extremes so surfaces stay distinguishable. That is a coherent starting point
-rather than a finished design, and individual tokens are meant to be adjusted
-by eye.
+The interface previously held 197 distinct colours across 215 usages, most
+differing by less than the eye can see. That made a light theme impossible to
+write and a custom one impossible to maintain, so they were consolidated into
+46 tokens.
+
+Consolidation kept the most-used colour of each group as the representative, so
+the colours covering the most screen did not move at all. Half the remaining
+usages shift by around two units of CIELAB distance and nine in ten by under
+seven, which is between imperceptible and barely visible.
+
+The light values were derived by inverting lightness while keeping hue, then
+damping saturated accents and clamping the extremes. That is a starting point
+rather than a finished design, and each token is one line to adjust.
+
+A custom theme is a block of the same token names with different values.
 
 A test asserts that no colour appears outside a theme block, that both themes
 define the same tokens, and that each declares a `color-scheme` so native

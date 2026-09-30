@@ -440,7 +440,7 @@ function registerIpcHandlers(): void {
 }
 
 /** Matches --bg-1 in each theme, so the window does not flash the wrong colour. */
-const windowBackground = { dark: "#0b1117", light: "#e7edf3" } as const;
+const windowBackground = { dark: "#0d161c", light: "#e7eef4" } as const;
 
 async function createWindow(show = true): Promise<void> {
   const applicationIcon = join(

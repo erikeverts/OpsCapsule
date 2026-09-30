@@ -37,7 +37,28 @@ describe("theme tokens", () => {
     // A token missing from one theme inherits the other's value and produces
     // an unreadable patch that is easy to miss.
     expect([...light.keys()].sort()).toEqual([...dark.keys()].sort());
-    expect(dark.size).toBeGreaterThan(100);
+  });
+
+  it("keeps the palette small enough to theme by hand", async () => {
+    const css = await stylesheet();
+    const dark = tokensIn(themeBlock(css, ':root[data-theme="dark"]'));
+    // This interface once had 197 one-off shades, most differing by less than
+    // the eye can see, which made a custom theme impractical. Guarding the
+    // count stops that accumulating again.
+    expect(dark.size).toBeLessThan(60);
+  });
+
+  it("organises the palette into named ramps", async () => {
+    const css = await stylesheet();
+    const names = [...tokensIn(themeBlock(css, ':root[data-theme="dark"]')).keys()];
+    // A ramp is what someone writing a theme actually edits; a flat list of
+    // unrelated names is what they cannot.
+    for (const family of ["surface", "accent", "success", "warning", "danger"]) {
+      expect(names.some((name) => name.startsWith(`--${family}-`))).toBe(true);
+    }
+    // Every token belongs to a family, so nothing is unclassifiable.
+    const families = new Set(names.map((name) => name.replace(/-\d+$/, "")));
+    expect(families.size).toBeLessThan(12);
   });
 
   it("gives the two themes different values", async () => {
