@@ -87,8 +87,48 @@ module.exports = {
   },
   makers: [
     {
+      // Linux ships as a zip rather than a package: it is unpacked and run
+      // without root, which is what a WSL installation wants, and it avoids
+      // depending on dpkg or rpmbuild being present to build it.
       name: "@electron-forge/maker-zip",
-      platforms: ["darwin"],
+      platforms: ["darwin", "linux"],
+    },
+    {
+      // A package rather than only an archive, so the shared libraries
+      // Electron needs are resolved by apt instead of discovered one
+      // "cannot open shared object file" at a time.
+      name: "@electron-forge/maker-deb",
+      platforms: ["linux"],
+      config: {
+        options: {
+          // The package is named in lower case, as Debian requires, while the
+          // binary keeps the product's capitalisation set by executableName.
+          // Without saying so the maker looks for a binary named after the
+          // package and fails.
+          name: "opscapsule",
+          bin: "OpsCapsule",
+          productName: "OpsCapsule",
+          genericName: "Operations Workspace",
+          categories: ["Development", "Utility"],
+          // Declared explicitly rather than left to the maker's defaults,
+          // which have historically lagged what Electron actually links
+          // against. Verified in CI against a minimal image.
+          depends: [
+            "libgtk-3-0",
+            "libnotify4",
+            "libnss3",
+            "libnspr4",
+            "libxtst6",
+            "libatspi2.0-0",
+            "libdrm2",
+            "libgbm1",
+            "libxkbcommon0",
+            "libasound2t64 | libasound2",
+            "libsecret-1-0",
+            "xdg-utils",
+          ],
+        },
+      },
     },
     {
       name: "@electron-forge/maker-dmg",
