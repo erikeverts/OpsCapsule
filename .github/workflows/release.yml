@@ -96,7 +96,11 @@ jobs:
           docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash -euc '
             apt-get update -qq
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./'"${package}"' >/dev/null
-            missing="$(ldd /opt/OpsCapsule/opscapsule 2>/dev/null | grep "not found" || true)"
+            # Resolve through the command the package installs rather than
+            # assuming where it put the files.
+            binary="$(readlink -f "$(command -v opscapsule)")"
+            echo "installed binary: ${binary}"
+            missing="$(ldd "${binary}" 2>/dev/null | grep "not found" || true)"
             if [ -n "${missing}" ]; then
               echo "Missing libraries after install:"; echo "${missing}"; exit 1
             fi

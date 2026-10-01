@@ -101,7 +101,12 @@ module.exports = {
       platforms: ["linux"],
       config: {
         options: {
+          // The package is named in lower case, as Debian requires, while the
+          // binary keeps the product's capitalisation set by executableName.
+          // Without saying so the maker looks for a binary named after the
+          // package and fails.
           name: "opscapsule",
+          bin: "OpsCapsule",
           productName: "OpsCapsule",
           genericName: "Operations Workspace",
           categories: ["Development", "Utility"],
