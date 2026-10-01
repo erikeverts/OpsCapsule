@@ -53,9 +53,12 @@ uname -m   # x86_64 takes x64, aarch64 takes arm64
 Use the `.deb` unless you have reason not to:
 
 ```bash
-sudo apt install ./opscapsule_0.4.0_amd64.deb
+sudo apt install ./opscapsule_*_amd64.deb   # or _arm64.deb
 opscapsule
 ```
+
+The artifact contains both forms: `deb/` holds the package and `zip/` the
+archive.
 
 Electron links against a set of system libraries that a default WSL
 installation does not have, and the first missing one appears as
