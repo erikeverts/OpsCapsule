@@ -47,12 +47,16 @@ filesystem, and run the binary. A zip is used rather than a package so nothing
 needs root.
 
 ```bash
-unzip opscapsule-linux-x64.zip -d ~/opscapsule
-~/opscapsule/OpsCapsule
+unzip OpsCapsule-linux-*.zip -d ~/opscapsule
+~/opscapsule/OpsCapsule-linux-*/OpsCapsule
 ```
 
-The build is **x86-64**. A Windows machine on ARM runs an ARM64 Linux under WSL
-and needs an ARM64 build, which is not produced yet.
+Both architectures are built. Take `x64` on an Intel or AMD machine and `arm64`
+on a Windows machine with an ARM processor, where WSL runs an ARM64 Linux:
+
+```bash
+uname -m   # x86_64 or aarch64
+```
 
 ### If it refuses to start over the sandbox helper
 
