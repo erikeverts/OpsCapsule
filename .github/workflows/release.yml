@@ -46,7 +46,11 @@ jobs:
       # Linux needs bwrap and socat at runtime. Installing them here keeps the
       # build host honest about what a user will need.
       - name: Install isolation runtime dependencies
-        run: sudo apt-get update && sudo apt-get install -y ripgrep bubblewrap socat
+        run: |
+          sudo apt-get update
+          # fakeroot and dpkg build the package; the rest are what a capsule
+          # needs at runtime and are installed so the tests exercise them.
+          sudo apt-get install -y ripgrep bubblewrap socat fakeroot dpkg
 
       # Native modules are rebuilt for Electron's ABI, so this cannot be
       # cross-built from another platform.
@@ -73,10 +77,31 @@ jobs:
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: opscapsule-${{ steps.artifacts.outputs.version }}-linux-${{ matrix.architecture }}
-          path: out/make/**/*.zip
+          path: |
+            out/make/**/*.zip
+            out/make/**/*.deb
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+      # Electron links against system libraries that a minimal installation
+      # does not have, which surfaces as "cannot open shared object file" on
+      # first run. The runner image is not minimal, so the package is checked
+      # against one that is.
+      - name: Verify the package declares every library it needs
+        if: matrix.architecture == 'x64'
+        shell: bash
+        run: |
+          package="$(find out/make -name '*.deb' -print -quit)"
+          docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash -euc '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./'"${package}"' >/dev/null
+            missing="$(ldd /opt/OpsCapsule/opscapsule 2>/dev/null | grep "not found" || true)"
+            if [ -n "${missing}" ]; then
+              echo "Missing libraries after install:"; echo "${missing}"; exit 1
+            fi
+            echo "every linked library resolves after apt install"
+          '
 
       - name: Verify the build matches the runner
         shell: bash

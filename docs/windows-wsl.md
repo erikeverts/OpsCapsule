@@ -42,38 +42,56 @@ the cause.
 
 ## Running it
 
-Download the Linux artifact from the Release workflow, unpack it inside the WSL
-filesystem, and run the binary. A zip is used rather than a package so nothing
-needs root.
+Each build produces two artifacts. Take the one matching your architecture:
 
 ```bash
+uname -m   # x86_64 takes x64, aarch64 takes arm64
+```
+
+### Install the package
+
+Use the `.deb` unless you have reason not to:
+
+```bash
+sudo apt install ./opscapsule_0.4.0_amd64.deb
+opscapsule
+```
+
+Electron links against a set of system libraries that a default WSL
+installation does not have, and the first missing one appears as
+`error while loading shared libraries: libnspr4.so`. The package declares them,
+so `apt` resolves them. Installing also puts `chrome-sandbox` in place with the
+ownership Electron expects.
+
+### Or run the archive
+
+The zip is the same application without an install step, which means both of
+those problems are yours to solve:
+
+```bash
+sudo apt-get install -y libgtk-3-0 libnotify4 libnss3 libnspr4 libxtst6 \
+  libatspi2.0-0 libdrm2 libgbm1 libxkbcommon0 libsecret-1-0 xdg-utils \
+  libasound2t64 || sudo apt-get install -y libasound2
+
 unzip OpsCapsule-linux-*.zip -d ~/opscapsule
-~/opscapsule/OpsCapsule-linux-*/OpsCapsule
+cd ~/opscapsule/OpsCapsule-linux-*
+
+# A zip cannot carry root ownership or the setuid bit, which Electron's
+# sandbox helper requires, so grant them before the first run.
+sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox
+./OpsCapsule
 ```
 
-Both architectures are built. Take `x64` on an Intel or AMD machine and `arm64`
-on a Windows machine with an ARM processor, where WSL runs an ARM64 Linux:
+Starting with `--no-sandbox` avoids that last step and is the wrong way round.
+It disables Chromium's own process sandbox, which protects the interface from
+the content it renders. It does not affect capsule isolation, which bubblewrap
+enforces separately, but it weakens the application and should not become the
+habit.
 
-```bash
-uname -m   # x86_64 or aarch64
-```
-
-### If it refuses to start over the sandbox helper
-
-Electron ships `chrome-sandbox`, which it expects to be owned by root with the
-setuid bit. A zip cannot carry that, so the first run may fail with a message
-about the sandbox being configured incorrectly. Grant it:
-
-```bash
-sudo chown root:root ~/opscapsule/OpsCapsule/chrome-sandbox
-sudo chmod 4755 ~/opscapsule/OpsCapsule/chrome-sandbox
-```
-
-Starting with `--no-sandbox` also works and is the wrong way round. That
-switch disables Chromium's own process sandbox, which protects the interface
-from the web content it renders. It does not affect capsule isolation, which is
-enforced separately by bubblewrap, but it weakens the application and should
-not become the habit.
+An unpacked Electron application is a directory rather than one file: a binary,
+a sandbox helper, resource archives, locales and the application bundle. macOS
+hides the same contents inside a `.app`, which is why it looks like a single
+item there.
 
 ## Keep workspaces inside WSL
 
