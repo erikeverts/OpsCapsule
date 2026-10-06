@@ -32,17 +32,16 @@ a hardcoded key, which is obfuscation rather than encryption, so OpsCapsule
 refuses to store credentials at all rather than store them unprotected.
 
 The keyring is reached over the **session bus**, which means OpsCapsule and the
-keyring have to run inside the *same* session. Starting a session for the
-keyring and then launching OpsCapsule separately does not work: the session
-ends with the command that created it.
+keyring have to run inside the same session. Starting OpsCapsule arranges this
+itself, so there is nothing extra to type:
 
 ```bash
-dbus-run-session -- bash -c '
-  eval "$(gnome-keyring-daemon --start --components=secrets)"
-  export GNOME_KEYRING_CONTROL
-  opscapsule
-'
+opscapsule
 ```
+
+When a desktop session already provides a bus, as on an ordinary Linux desktop,
+the launcher changes nothing and hands straight over. When there is none, as on
+WSL, it creates one and starts a secret service inside it before launching.
 
 The first run creates a login keyring and may ask for a password.
 
@@ -109,7 +108,10 @@ cd ~/opscapsule/OpsCapsule-linux-*
 # A zip cannot carry root ownership or the setuid bit, which Electron's
 # sandbox helper requires, so grant them before the first run.
 sudo chown root:root chrome-sandbox && sudo chmod 4755 chrome-sandbox
-./OpsCapsule
+
+# The launcher arranges a session and keyring when the host has none.
+# ./OpsCapsule starts the application directly and skips that.
+./opscapsule-launcher
 ```
 
 Starting with `--no-sandbox` avoids that last step and is the wrong way round.

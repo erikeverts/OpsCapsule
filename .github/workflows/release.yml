@@ -111,6 +111,13 @@ jobs:
               command -v "${tool}" >/dev/null || { echo "missing ${tool}"; exit 1; }
             done
             echo "isolation and broker tools present after apt install"
+            # The command on PATH must be the launcher, or a host without a
+            # session bus is back to assembling one by hand.
+            head -n 1 "$(command -v opscapsule)" | grep -q "^#!/bin/sh" \
+              || { echo "opscapsule on PATH is not the launcher"; exit 1; }
+            grep -q "dbus-run-session" "$(command -v opscapsule)" \
+              || { echo "launcher does not arrange a session"; exit 1; }
+            echo "launcher installed as the command on PATH"
           '
 
       - name: Verify the build matches the runner

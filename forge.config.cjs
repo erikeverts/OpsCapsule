@@ -1,3 +1,4 @@
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { flipFuses, FuseV1Options, FuseVersion } = require("@electron/fuses");
 
@@ -66,6 +67,20 @@ module.exports = {
             "..",
             platform === "win32" ? "electron.exe" : "electron",
           );
+      if (platform === "linux") {
+        // Installed as the command on PATH, so starting OpsCapsule arranges
+        // its own session on a host that has none rather than asking the user
+        // to assemble one.
+        // Named so it cannot collide with the OpsCapsule binary beside it on
+        // a case-insensitive filesystem. The command on PATH stays
+        // "opscapsule" regardless, since the package name decides that.
+        const launcher = path.join(buildPath, "..", "..", "opscapsule-launcher");
+        await fs.copyFile(
+          path.join(__dirname, "build", "linux-launcher.sh"),
+          launcher,
+        );
+        await fs.chmod(launcher, 0o755);
+      }
       await flipFuses(executablePath, {
         version: FuseVersion.V1,
         strictlyRequireAllFuses: true,
@@ -106,7 +121,9 @@ module.exports = {
           // Without saying so the maker looks for a binary named after the
           // package and fails.
           name: "opscapsule",
-          bin: "OpsCapsule",
+          // The command on PATH is the launcher, which hands over to the
+          // Electron binary beside it.
+          bin: "opscapsule-launcher",
           productName: "OpsCapsule",
           genericName: "Operations Workspace",
           categories: ["Development", "Utility"],
