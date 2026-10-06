@@ -58,7 +58,7 @@ jobs:
         run: npm ci
 
       - name: Audit runtime dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run audit:runtime
 
       - name: Run automated tests
         run: npm test
@@ -172,7 +172,7 @@ jobs:
         run: npm ci
 
       - name: Audit runtime dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run audit:runtime
 
       # Enforced macOS isolation requires ripgrep at runtime, and the sandbox
       # acceptance test skips itself when it is absent. Installing it here
