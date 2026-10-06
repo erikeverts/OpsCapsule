@@ -48,6 +48,34 @@ The first run creates a login keyring and may ask for a password.
 If credentials cannot be stored, the Credentials pane says which of the two is
 missing, the session or the keyring, since they need different fixes.
 
+## When a capsule will not start
+
+Capsules run under bubblewrap, which needs unprivileged user namespaces.
+Ubuntu 24.04 restricts those by default through AppArmor, and a restricted host
+reports only a permission error, which names nothing useful. Check directly:
+
+```bash
+bwrap --ro-bind / / --dev /dev --unshare-user --unshare-pid true \
+  && echo "bubblewrap works"
+```
+
+If that fails with a permission error, allow unprivileged user namespaces:
+
+```bash
+sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+```
+
+To keep it across restarts:
+
+```bash
+echo "kernel.apparmor_restrict_unprivileged_userns=0" \
+  | sudo tee /etc/sysctl.d/60-opscapsule.conf
+```
+
+This widens what unprivileged processes on the host may do, which is a real
+trade and worth making deliberately. OpsCapsule will not quietly run capsules
+without isolation instead: a capsule that cannot be isolated does not start.
+
 ## Console messages that are expected
 
 WSL runs no system D-Bus daemon, so Chromium reports that it cannot reach it:
