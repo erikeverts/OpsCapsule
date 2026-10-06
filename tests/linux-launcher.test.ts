@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
 import { chmod, mkdir, mkdtemp, writeFile, copyFile } from "node:fs/promises";
 import { join } from "node:path";
+import { createRequire } from "node:module";
 import { promisify } from "node:util";
 import { describe, expect, it } from "vitest";
 
@@ -102,12 +103,12 @@ describe("the Linux launcher", () => {
 });
 
 describe("the launcher's name", () => {
-  it("differs from the binary by more than case", async () => {
+  it("differs from the binary by more than case", () => {
     // These sit in one directory. Differing only by case makes them the same
     // file on a case-insensitive filesystem, where the launcher silently
     // overwrites the binary it is supposed to start.
-    const config = await import("../forge.config.cjs");
-    const forge = (config.default ?? config) as {
+    const load = createRequire(import.meta.url);
+    const forge = load("../forge.config.cjs") as {
       packagerConfig: { executableName: string };
       makers: { name: string; config?: { options?: { bin?: string } } }[];
     };
