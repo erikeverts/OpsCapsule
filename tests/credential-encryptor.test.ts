@@ -65,8 +65,13 @@ describe("encryptor", () => {
   });
 
   it("names the remedy on Linux and stays generic elsewhere", () => {
-    expect(describeUnavailableStorage("linux")).toMatch(/gnome-keyring|kwallet/);
-    expect(describeUnavailableStorage("darwin")).not.toMatch(/keyring/);
+    // With a session bus present, the remaining explanation is the keyring.
+    expect(
+      describeUnavailableStorage("linux", {
+        DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+      }),
+    ).toMatch(/gnome-keyring|kwallet/);
+    expect(describeUnavailableStorage("darwin", {})).not.toMatch(/keyring/);
   });
 });
 
@@ -88,5 +93,29 @@ describe("the store refuses to write without real protection", () => {
         "secret",
       ),
     ).rejects.toThrow(/keyring.*refuses to fall back to plaintext/s);
+  });
+});
+
+describe("telling the two Linux failures apart", () => {
+  it("names the session bus when there is none", () => {
+    // A keyring is reached over the session bus, so both failures look the
+    // same from here. Advising someone to install a keyring they already have
+    // sends them the wrong way.
+    const message = describeUnavailableStorage("linux", {});
+    expect(message).toMatch(/D-Bus session/);
+    expect(message).toMatch(/dbus-run-session/);
+  });
+
+  it("names the keyring when the bus is there but the keyring is not", () => {
+    const message = describeUnavailableStorage("linux", {
+      DBUS_SESSION_BUS_ADDRESS: "unix:path=/run/user/1000/bus",
+    });
+    expect(message).toMatch(/keyring/);
+    expect(message).not.toMatch(/D-Bus session/);
+  });
+
+  it("says neither on platforms where neither applies", () => {
+    const message = describeUnavailableStorage("darwin", {});
+    expect(message).not.toMatch(/D-Bus|keyring/);
   });
 });

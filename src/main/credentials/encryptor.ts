@@ -54,12 +54,24 @@ export function createSecretEncryptor(
 
 export function describeUnavailableStorage(
   platform: NodeJS.Platform = process.platform,
+  environment: NodeJS.ProcessEnv = process.env,
 ): string {
-  if (platform === "linux") {
+  if (platform !== "linux") {
+    return "OS-backed encryption is unavailable, so credentials cannot be stored.";
+  }
+  // A keyring is reached over the session bus, so a missing bus and a missing
+  // keyring look identical from here. They need different fixes, and telling
+  // someone to install a keyring they already have is a poor way to spend
+  // their afternoon.
+  if (!environment.DBUS_SESSION_BUS_ADDRESS) {
     return (
-      "No system keyring is available, so credentials cannot be stored safely. " +
-      "Install and unlock gnome-keyring or kwallet, then try again."
+      "No D-Bus session is available, so the keyring cannot be reached. " +
+      "Start OpsCapsule inside a session that also runs the keyring, for " +
+      "example with dbus-run-session."
     );
   }
-  return "OS-backed encryption is unavailable, so credentials cannot be stored.";
+  return (
+    "No system keyring is available, so credentials cannot be stored safely. " +
+    "Install and unlock gnome-keyring or kwallet, then try again."
+  );
 }

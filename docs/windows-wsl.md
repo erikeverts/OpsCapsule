@@ -26,20 +26,46 @@ sudo apt install ./opscapsule_*_amd64.deb   # or _arm64.deb
 
 ## The keyring is not optional
 
-A default WSL installation has no keyring. Without one, Electron falls back to
-a backend that encrypts with a hardcoded key, which is obfuscation rather than
-encryption, and OpsCapsule refuses to store credentials at all rather than
-store them unprotected.
+A default WSL installation has no keyring, and no D-Bus session for one to be
+reached over. Without them Electron falls back to a backend that encrypts with
+a hardcoded key, which is obfuscation rather than encryption, so OpsCapsule
+refuses to store credentials at all rather than store them unprotected.
 
-The keyring also has to be unlocked in the session:
+The keyring is reached over the **session bus**, which means OpsCapsule and the
+keyring have to run inside the *same* session. Starting a session for the
+keyring and then launching OpsCapsule separately does not work: the session
+ends with the command that created it.
 
 ```bash
-# Starts a session daemon and unlocks the login keyring.
-dbus-run-session -- gnome-keyring-daemon --unlock
+dbus-run-session -- bash -c '
+  eval "$(gnome-keyring-daemon --start --components=secrets)"
+  export GNOME_KEYRING_CONTROL
+  opscapsule
+'
 ```
 
-If credentials cannot be stored, the Credentials pane says so and names this as
-the cause.
+The first run creates a login keyring and may ask for a password.
+
+If credentials cannot be stored, the Credentials pane says which of the two is
+missing, the session or the keyring, since they need different fixes.
+
+## Console messages that are expected
+
+WSL runs no system D-Bus daemon, so Chromium reports that it cannot reach it:
+
+```
+ERROR:dbus/bus.cc:406] Failed to connect to the bus:
+  Failed to connect to socket /run/dbus/system_bus_socket
+ERROR:dbus/object_proxy.cc:572] Failed to call method:
+  org.freedesktop.DBus.NameHasOwner
+```
+
+These concern the **system** bus, which Chromium uses for desktop integrations
+such as power management and notifications. Nothing OpsCapsule depends on uses
+it, and the messages are noise.
+
+Messages about the **session** bus are different: that is the one the keyring
+needs, and the command above provides it.
 
 ## Running it
 
