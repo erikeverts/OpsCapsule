@@ -37,6 +37,16 @@ describe("naming the cause of a sandbox that will not start", () => {
     expect(explained).toContain("setting up uid map");
   });
 
+  it("does not blame namespaces for a bare permission error", () => {
+    // Permission errors have many causes. A host where bubblewrap demonstrably
+    // works would be sent to loosen a security setting for nothing.
+    const explained = describeSandboxFailure(
+      "bwrap: Can't bind mount: Operation not permitted",
+      "linux",
+    );
+    expect(explained).not.toContain("unprivileged user namespaces");
+  });
+
   it("does not guess at namespaces for unrelated failures", () => {
     const explained = describeSandboxFailure("bwrap: No such file or directory", "linux");
     expect(explained).toBe("bwrap: No such file or directory");

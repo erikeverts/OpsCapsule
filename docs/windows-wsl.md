@@ -50,16 +50,22 @@ missing, the session or the keyring, since they need different fixes.
 
 ## When a capsule will not start
 
-Capsules run under bubblewrap, which needs unprivileged user namespaces.
-Ubuntu 24.04 restricts those by default through AppArmor, and a restricted host
-reports only a permission error, which names nothing useful. Check directly:
+OpsCapsule reports what the sandbox said when it refused to start, so read that
+message first rather than working through causes in order.
+
+One cause is worth ruling out early, because the host reports it only as a
+permission error: capsules run under bubblewrap, which needs unprivileged user
+namespaces, and Ubuntu 24.04 restricts those by default through AppArmor.
+Check directly:
 
 ```bash
 bwrap --ro-bind / / --dev /dev --unshare-user --unshare-pid true \
   && echo "bubblewrap works"
 ```
 
-If that fails with a permission error, allow unprivileged user namespaces:
+If it prints `bubblewrap works`, namespaces are not the problem and the
+sandbox message is describing something else. If it fails with a permission
+error, allow unprivileged user namespaces:
 
 ```bash
 sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0

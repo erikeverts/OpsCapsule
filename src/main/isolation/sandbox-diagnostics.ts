@@ -12,10 +12,11 @@ export function describeSandboxFailure(
   detail: string,
   platform: NodeJS.Platform = process.platform,
 ): string {
+  // Only markers specific to namespace setup. "Operation not permitted" alone
+  // appears in unrelated failures, and blaming it on namespaces would send
+  // someone to change a host security setting that was never the problem.
   const namespaces =
-    /user namespace|CLONE_NEWUSER|setting up uid map|unshare|Operation not permitted/i.test(
-      detail,
-    );
+    /user namespace|CLONE_NEWUSER|setting up uid map|unshare\(/i.test(detail);
   if (platform === "linux" && namespaces) {
     return (
       `${detail} This host restricts unprivileged user namespaces, which the ` +
