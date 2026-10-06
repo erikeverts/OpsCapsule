@@ -98,8 +98,17 @@ jobs:
             DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./'"${package}"' >/dev/null
             # Resolve through the command the package installs rather than
             # assuming where it put the files.
-            binary="$(readlink -f "$(command -v opscapsule)")"
+            launcher="$(readlink -f "$(command -v opscapsule)")"
+            # The command on PATH is a shell script, and ldd reports a script
+            # as "not a dynamic executable" without listing anything, so
+            # checking it instead of the binary would pass while testing
+            # nothing.
+            binary="$(dirname "${launcher}")/OpsCapsule"
+            [ -x "${binary}" ] || { echo "no binary beside the launcher"; exit 1; }
+            echo "installed launcher: ${launcher}"
             echo "installed binary: ${binary}"
+            file "${binary}" | grep -q "ELF" \
+              || { echo "binary under test is not an executable"; exit 1; }
             missing="$(ldd "${binary}" 2>/dev/null | grep "not found" || true)"
             if [ -n "${missing}" ]; then
               echo "Missing libraries after install:"; echo "${missing}"; exit 1
@@ -111,6 +120,17 @@ jobs:
               command -v "${tool}" >/dev/null || { echo "missing ${tool}"; exit 1; }
             done
             echo "isolation and broker tools present after apt install"
+            # The seccomp helper is a native executable. Packed into the asar
+            # it would still be listed but could not be run, and the failure
+            # would only appear when someone started a capsule.
+            seccomp="$(dirname "${binary}")/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp"
+            case "$(dpkg --print-architecture)" in
+              amd64) helper="${seccomp}/x64/apply-seccomp" ;;
+              arm64) helper="${seccomp}/arm64/apply-seccomp" ;;
+              *) echo "unexpected architecture"; exit 1 ;;
+            esac
+            [ -x "${helper}" ] || { echo "seccomp helper missing or not executable: ${helper}"; exit 1; }
+            echo "seccomp helper is a real executable outside the asar"
             # The command on PATH must be the launcher, or a host without a
             # session bus is back to assembling one by hand.
             head -n 1 "$(command -v opscapsule)" | grep -q "^#!/bin/sh" \
