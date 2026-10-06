@@ -107,8 +107,10 @@ jobs:
             [ -x "${binary}" ] || { echo "no binary beside the launcher"; exit 1; }
             echo "installed launcher: ${launcher}"
             echo "installed binary: ${binary}"
-            file "${binary}" | grep -q "ELF" \
-              || { echo "binary under test is not an executable"; exit 1; }
+            # Reads the ELF magic rather than calling file, which the minimal
+            # image does not ship.
+            head -c 4 "${binary}" | grep -aq "ELF" \
+              || { echo "binary under test is not an ELF executable"; exit 1; }
             missing="$(ldd "${binary}" 2>/dev/null | grep "not found" || true)"
             if [ -n "${missing}" ]; then
               echo "Missing libraries after install:"; echo "${missing}"; exit 1
