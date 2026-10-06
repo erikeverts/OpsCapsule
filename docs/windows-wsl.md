@@ -13,14 +13,15 @@ without that isolation would carry the product's name without its property.
 | --- | --- |
 | Windows 11, or Windows 10 with WSLg | Runs the interface as a Windows window |
 | WSL2 with a distribution | Provides the Linux kernel the isolation uses |
-| `bubblewrap`, `socat`, `ripgrep`, `curl` | Enforced isolation and the credential broker |
-| A keyring, such as `gnome-keyring` | Credential storage refuses to run without one |
 
-On Debian or Ubuntu under WSL:
+Everything else is declared by the package, including `bubblewrap` and `socat`
+for enforced isolation, `ripgrep` and `curl` for the sandbox preflight and the
+credential broker, and a keyring. Installing it is enough to launch a capsule,
+not merely enough to open the window:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y bubblewrap socat ripgrep curl gnome-keyring
+sudo apt install ./opscapsule_*_amd64.deb   # or _arm64.deb
 ```
 
 ## The keyring is not optional

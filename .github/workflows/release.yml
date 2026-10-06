@@ -105,6 +105,12 @@ jobs:
               echo "Missing libraries after install:"; echo "${missing}"; exit 1
             fi
             echo "every linked library resolves after apt install"
+            # Installing the package must be enough to launch a capsule, not
+            # just enough to start the window.
+            for tool in bwrap socat rg curl; do
+              command -v "${tool}" >/dev/null || { echo "missing ${tool}"; exit 1; }
+            done
+            echo "isolation and broker tools present after apt install"
           '
 
       - name: Verify the build matches the runner

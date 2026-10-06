@@ -114,6 +114,20 @@ module.exports = {
           // which have historically lagged what Electron actually links
           // against. Verified in CI against a minimal image.
           depends: [
+            // What OpsCapsule needs, not only what Electron needs. Enforced
+            // isolation uses bubblewrap, the credential broker reaches the
+            // main process with curl, and the sandbox preflight requires
+            // ripgrep. Leaving these to a separate instruction meant a user
+            // could install the package and still not be able to launch a
+            // capsule.
+            "bubblewrap",
+            "socat",
+            "ripgrep",
+            "curl",
+            // Credential storage refuses to run without a keyring rather than
+            // store secrets unprotected, so one is required rather than
+            // suggested. Either provider satisfies it.
+            "gnome-keyring | kwalletmanager",
             "libgtk-3-0",
             "libnotify4",
             "libnss3",
