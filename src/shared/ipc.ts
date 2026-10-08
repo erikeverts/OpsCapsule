@@ -6,6 +6,7 @@ export const IPC = {
   deleteWorkspace: "workspace:delete",
   choosePath: "workspace:choose-path",
   inspectDirectory: "workspace:inspect-directory",
+  discoverPathAliases: "workspace:discover-path-aliases",
   inspectAgentConfiguration: "workspace:inspect-agent-configuration",
   discoverLocalResources: "workspace:discover-local-resources",
   checkTargetReadiness: "workspace:check-target-readiness",

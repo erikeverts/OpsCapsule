@@ -109,6 +109,7 @@ function blankWorkspace(): WorkspaceManifest {
         name: "Workspace",
         path: "",
         access: "read-write",
+        aliases: [],
       },
     ],
     targets: [
@@ -613,6 +614,9 @@ export function WorkspaceEditor({
   >([]);
   const [credentialBusy, setCredentialBusy] = useState<string | null>(null);
   const [credentialError, setCredentialError] = useState<string | null>(null);
+  const [discoveredAliases, setDiscoveredAliases] = useState<
+    Record<string, string[]>
+  >({});
   const [generatedDirectoryIds, setGeneratedDirectoryIds] = useState<Set<string>>(
     () => (mode === "create" ? new Set(["workspace"]) : new Set()),
   );
@@ -994,6 +998,40 @@ export function WorkspaceEditor({
     }
   }
 
+  // Directories already configured get the same offer as freshly picked ones,
+  // since a workspace written before this existed may well name a folder by
+  // its resolved path while its agents use another. Settles after typing
+  // stops rather than scanning on every keystroke.
+  const directoryPaths = (draft?.directories ?? [])
+    .map((directory) => `${directory.id}\u0000${directory.path}`)
+    .join("\u0001");
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      for (const entry of directoryPaths.split("\u0001")) {
+        const [id, path] = entry.split("\u0000");
+        if (id && path) {
+          void offerAliases(id, path);
+        }
+      }
+    }, 400);
+    return () => clearTimeout(timer);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [directoryPaths]);
+
+  /**
+   * The open panel resolves symbolic links, so a folder picked through one
+   * comes back under its real name. Offer the other names it is reachable by
+   * rather than leaving an agent refused for using the name it was given.
+   */
+  async function offerAliases(directoryId: string, path: string): Promise<void> {
+    if (!path) {
+      setDiscoveredAliases((current) => ({ ...current, [directoryId]: [] }));
+      return;
+    }
+    const found = await window.opsCapsule.discoverPathAliases(path);
+    setDiscoveredAliases((current) => ({ ...current, [directoryId]: found }));
+  }
+
   if (loading || !draft) {
     return (
       <section className="studio-loading">
@@ -1155,6 +1193,7 @@ export function WorkspaceEditor({
                           name: "Directory",
                           path: "",
                           access: "read-write",
+                          aliases: [],
                         });
                         });
                       }
@@ -1257,17 +1296,50 @@ export function WorkspaceEditor({
                           <button
                             className="small-button"
                             onClick={() =>
-                              void browsePath("directory", (path) =>
+                              void browsePath("directory", (path) => {
                                 updateDraft((next) => {
                                   next.directories[index]!.path = path;
-                                }),
-                              )
+                                  // A path chosen afresh carries none of the
+                                  // previous folder's other names.
+                                  next.directories[index]!.aliases = [];
+                                });
+                                void offerAliases(directory.id, path);
+                              })
                             }
                             type="button"
                           >
                             Browse…
                           </button>
                         </div>
+                        {(discoveredAliases[directory.id] ?? []).length > 0 ? (
+                          <div className="path-aliases">
+                            <p className="path-aliases-lead">
+                              Also reachable at. Include a path if an agent is
+                              told to use it; otherwise it stays out of reach.
+                            </p>
+                            {(discoveredAliases[directory.id] ?? []).map(
+                              (alias) => (
+                                <label className="path-alias" key={alias}>
+                                  <input
+                                    checked={directory.aliases.includes(alias)}
+                                    onChange={(event) =>
+                                      updateDraft((next) => {
+                                        const entry = next.directories[index]!;
+                                        entry.aliases = event.target.checked
+                                          ? [...entry.aliases, alias]
+                                          : entry.aliases.filter(
+                                              (kept) => kept !== alias,
+                                            );
+                                      })
+                                    }
+                                    type="checkbox"
+                                  />
+                                  <code>{alias}</code>
+                                </label>
+                              ),
+                            )}
+                          </div>
+                        ) : null}
                       </Field>
                     </div>
                   </article>

@@ -41,7 +41,13 @@ function workspace(): WorkspaceManifest {
       },
     ],
     directories: [
-      { id: "directory", name: "Directory", path: "/tmp", access: "read-write" },
+      {
+        id: "directory",
+        name: "Directory",
+        path: "/tmp",
+        access: "read-write",
+        aliases: [],
+      },
     ],
     targets: [
       {
