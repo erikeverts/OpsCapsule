@@ -6,6 +6,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { discoverPathAliases } from "../src/main/isolation/path-aliases.js";
 import { resolvePathChain } from "../src/main/isolation/path-chain.js";
 import {
   buildSandboxRuntimeSettings,
@@ -309,6 +310,93 @@ describe.skipIf(!macOsSandboxAvailable)(
         await resetSandboxRuntime();
       },
       20_000,
+    );
+
+    it(
+      "grants an alias only when it has been included",
+      async () => {
+        // The open panel hands back a resolved path, so the name an agent is
+        // told to use can be one the workspace never mentions. Including it is
+        // the user's decision, and nothing reaches the profile without it.
+        const temporaryRoot =
+          process.platform === "darwin" ? "/private/tmp" : tmpdir();
+        const base = await mkdtemp(join(temporaryRoot, "oc-alias-"));
+        temporaryDirectories.push(base);
+        const store = join(base, "storage", "work");
+        await mkdir(join(store, "project"), { recursive: true });
+        await writeFile(join(store, "project", "file.txt"), "contents\n");
+        await symlink(store, join(base, "work"));
+
+        const picked = join(store, "project");
+        const alias = join(base, "work", "project");
+        const root = join(base, "runtime");
+        await mkdir(join(root, "home"), { recursive: true });
+        await mkdir(join(base, "target-state"), { recursive: true });
+        const runtime = {
+          root,
+          home: join(root, "home"),
+          temp: join(root, "home"),
+          kubeconfig: join(root, "k.yaml"),
+          sandboxConfig: join(root, "s.json"),
+          targetState: join(base, "target-state"),
+          agentState: join(base, "target-state", "agents", "x"),
+        };
+
+        const readThrough = async (
+          allowed: string[],
+          path: string,
+        ): Promise<boolean> => {
+          const isolation = await new SandboxRuntimeIsolationBackend({
+            runtime,
+            readOnlyPaths: [],
+            readWritePaths: allowed,
+            network: { mode: "deny", allowedDomains: [] },
+          }).prepare();
+          if (isolation.execution.backend !== "sandbox-runtime") {
+            throw new Error("Expected Sandbox Runtime execution");
+          }
+          await initializeSandboxRuntime(isolation.execution);
+          const launch = await wrapSandboxedLaunch(
+            {
+              command: "/bin/cat",
+              args: [join(path, "file.txt")],
+              cwd: temporaryRoot,
+              env: { ...process.env, HOME: runtime.home } as Record<string, string>,
+            },
+            "alias-read",
+          );
+          try {
+            await executeFile(launch.command, launch.args, {
+              cwd: launch.cwd,
+              env: launch.env,
+            });
+            return true;
+          } catch {
+            return false;
+          } finally {
+            cleanupSandboxCommand();
+            await resetSandboxRuntime();
+          }
+        };
+
+        // Discovery offers the alias, but offering is not granting.
+        expect(await discoverPathAliases(picked)).toContain(alias);
+
+        const withoutAlias = await resolvePathChain(picked);
+        expect(await readThrough(withoutAlias, picked)).toBe(true);
+        expect(await readThrough(withoutAlias, join(base, "work", "project"))).toBe(
+          false,
+        );
+
+        const withAlias = [
+          ...(await resolvePathChain(picked)),
+          ...(await resolvePathChain(alias)),
+        ];
+        expect(await readThrough(withAlias, join(base, "work", "project"))).toBe(
+          true,
+        );
+      },
+      40_000,
     );
   },
 );

@@ -1371,6 +1371,34 @@ input:disabled:not([type="checkbox"]):not([type="radio"]) {
   gap: 7px;
 }
 
+.path-aliases {
+  display: grid;
+  gap: 5px;
+  margin-top: 8px;
+  padding: 9px 11px;
+  border: 1px solid var(--surface-3);
+  border-radius: 7px;
+  background: var(--surface-2);
+}
+
+.path-aliases-lead {
+  margin: 0 0 2px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.path-alias {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.path-alias code {
+  overflow-wrap: anywhere;
+  font-size: 12px;
+}
+
 .path-value {
   display: block;
   padding: 9px;
