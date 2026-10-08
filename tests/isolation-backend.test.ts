@@ -1,11 +1,12 @@
 import { execFile } from "node:child_process";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import { SandboxRuntimeConfigSchema } from "@anthropic-ai/sandbox-runtime";
 import { afterEach, describe, expect, it } from "vitest";
+import { resolvePathChain } from "../src/main/isolation/path-chain.js";
 import {
   buildSandboxRuntimeSettings,
   SandboxRuntimeIsolationBackend,
@@ -209,6 +210,99 @@ describe.skipIf(!macOsSandboxAvailable)(
           executeFile(deniedLaunch.command, deniedLaunch.args, {
             cwd: deniedLaunch.cwd,
             env: deniedLaunch.env,
+          }),
+        ).rejects.toMatchObject({ code: 1 });
+        cleanupSandboxCommand();
+        await resetSandboxRuntime();
+      },
+      20_000,
+    );
+
+    it(
+      "reaches a root through the symbolic links it is configured behind",
+      async () => {
+        // Cloud storage directories are arranged this way: a link in the home
+        // directory pointing at a path that is itself behind a link. Allowing
+        // only the resolved path leaves the root unreachable by the name the
+        // user configured, which is how this failed in practice.
+        const temporaryRoot =
+          process.platform === "darwin" ? "/private/tmp" : tmpdir();
+        const base = await mkdtemp(join(temporaryRoot, "oc-symlink-"));
+        temporaryDirectories.push(base);
+        const store = join(base, "storage", "Account");
+        const work = join(store, "work");
+        const root = join(base, "runtime");
+        const home = join(root, "home");
+        const sessionTemp = join(root, "tmp");
+        await Promise.all(
+          [work, home, sessionTemp, join(base, "target-state")].map((path) =>
+            mkdir(path, { recursive: true }),
+          ),
+        );
+        await writeFile(join(work, "allowed.txt"), "allowed\n");
+        // A sibling of the link target, which must stay out of reach.
+        await writeFile(join(store, "private.txt"), "private\n");
+        await symlink(store, join(base, "Account"));
+        await symlink(join(base, "Account", "work"), join(base, "work"));
+
+        const configured = join(base, "work");
+        const runtime = {
+          root,
+          home,
+          temp: sessionTemp,
+          kubeconfig: join(root, "kubeconfig.yaml"),
+          sandboxConfig: join(root, "sandbox.json"),
+          targetState: join(base, "target-state"),
+          agentState: join(base, "target-state", "agents", "example"),
+        };
+        const isolation = await new SandboxRuntimeIsolationBackend({
+          runtime,
+          readOnlyPaths: [],
+          readWritePaths: await resolvePathChain(configured),
+          network: { mode: "deny", allowedDomains: [] },
+        }).prepare();
+        const environment = {
+          ...process.env,
+          HOME: home,
+          TMPDIR: sessionTemp,
+        } as Record<string, string>;
+
+        if (isolation.execution.backend !== "sandbox-runtime") {
+          throw new Error("Expected Sandbox Runtime execution");
+        }
+        await initializeSandboxRuntime(isolation.execution);
+
+        const throughLink = await wrapSandboxedLaunch(
+          {
+            command: "/bin/cat",
+            args: [join(configured, "allowed.txt")],
+            cwd: configured,
+            env: environment,
+          },
+          "symlink-allowed-read",
+        );
+        const result = await executeFile(throughLink.command, throughLink.args, {
+          cwd: throughLink.cwd,
+          env: throughLink.env,
+        });
+        cleanupSandboxCommand();
+        expect(result.stdout).toBe("allowed\n");
+
+        // Permitting the link nodes must not widen access to what sits beside
+        // the target, or following links would quietly open the whole store.
+        const sibling = await wrapSandboxedLaunch(
+          {
+            command: "/bin/sh",
+            args: ["-c", 'cat "$1"', "child", join(store, "private.txt")],
+            cwd: configured,
+            env: environment,
+          },
+          "symlink-denied-read",
+        );
+        await expect(
+          executeFile(sibling.command, sibling.args, {
+            cwd: sibling.cwd,
+            env: sibling.env,
           }),
         ).rejects.toMatchObject({ code: 1 });
         cleanupSandboxCommand();
