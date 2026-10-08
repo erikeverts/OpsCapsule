@@ -207,6 +207,13 @@ export const directorySchema = z.object({
   name: z.string().min(1),
   path: z.string().min(1),
   access: z.enum(["read-only", "read-write"]),
+  /**
+   * Other paths that reach this same directory through a symbolic link, which
+   * the user chose to include. Absent means none were included: an alias is
+   * never granted without being recorded here, so what a capsule may read
+   * stays readable from the workspace file.
+   */
+  aliases: z.array(z.string().min(1)).default([]),
 });
 
 const networkPolicySchema = z

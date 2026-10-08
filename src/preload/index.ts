@@ -24,6 +24,8 @@ const api: OpsCapsuleApi = {
   choosePath: (kind) => ipcRenderer.invoke(IPC.choosePath, { kind }),
   inspectDirectory: (path) =>
     ipcRenderer.invoke(IPC.inspectDirectory, { path }),
+  discoverPathAliases: (path) =>
+    ipcRenderer.invoke(IPC.discoverPathAliases, { path }),
   inspectAgentConfiguration: (path, workspaceId) =>
     ipcRenderer.invoke(IPC.inspectAgentConfiguration, { path, workspaceId }),
   discoverLocalResources: () =>

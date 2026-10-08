@@ -261,6 +261,10 @@ export const inspectDirectoryInput = z.object({
   path: z.string().min(1),
 });
 
+export const discoverPathAliasesInput = z.object({
+  path: z.string().min(1),
+});
+
 export const inspectAgentConfigurationInput = z.object({
   path: z.string().min(1),
   workspaceId: z.string().min(1).optional(),
@@ -338,6 +342,12 @@ export interface OpsCapsuleApi {
   deleteWorkspace(workspaceId: string, revision: string): Promise<void>;
   choosePath(kind: "directory" | "file"): Promise<string | null>;
   inspectDirectory(path: string): Promise<DirectoryInspection>;
+  /**
+   * Other paths that reach the same directory through a symbolic link. The
+   * open panel resolves links before returning a path, so a folder picked
+   * through one arrives under a name an agent may not be told to use.
+   */
+  discoverPathAliases(path: string): Promise<string[]>;
   inspectAgentConfiguration(
     path: string,
     workspaceId?: string,

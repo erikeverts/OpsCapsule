@@ -714,6 +714,11 @@ export class WorkspaceRegistry {
       return {
         ...directory,
         path: resolveConfiguredPath(directory.path, workspace.sourcePath),
+        // Aliases are paths in their own right and are written the same way,
+        // so they get the same treatment as the directory's own path.
+        aliases: directory.aliases.map((alias) =>
+          resolveConfiguredPath(alias, workspace.sourcePath),
+        ),
       };
     });
     const defaultDirectory = directories.find(

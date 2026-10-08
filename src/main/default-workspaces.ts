@@ -75,12 +75,14 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
         name: "Application",
         path: join(demoRoot, "atlas", "application"),
         access: "read-write",
+      aliases: [],
       },
       {
         id: "documentation",
         name: "Documentation",
         path: join(demoRoot, "atlas", "documentation"),
         access: "read-only",
+        aliases: [],
       },
     ],
     targets: [
@@ -170,6 +172,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
         name: "Operations",
         path: join(demoRoot, "borealis", "operations"),
         access: "read-write",
+        aliases: [],
       },
     ],
     targets: [

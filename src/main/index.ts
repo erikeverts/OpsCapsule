@@ -23,6 +23,7 @@ import {
   openExternalInput,
   savePreferencesInput,
   deleteWorkspaceInput,
+  discoverPathAliasesInput,
   inspectDirectoryInput,
   inspectAgentConfigurationInput,
   saveWorkspaceInput,
@@ -41,6 +42,7 @@ import {
   resolveTheme,
 } from "../shared/preferences.js";
 import { prepareIsolation } from "./isolation/prepare.js";
+import { discoverPathAliases } from "./isolation/path-aliases.js";
 import { CredentialBrokerSession } from "./credentials/broker.js";
 import { createBrokerToken } from "./credentials/helper.js";
 import { createCredentialIssuer } from "./credentials/issuer.js";
@@ -167,6 +169,17 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.inspectDirectory, (_event, input: unknown) => {
     const { path } = inspectDirectoryInput.parse(input);
     return inspectDirectory(path);
+  });
+
+  ipcMain.handle(IPC.discoverPathAliases, async (_event, input: unknown) => {
+    const { path } = discoverPathAliasesInput.parse(input);
+    try {
+      return await discoverPathAliases(path);
+    } catch {
+      // A path that cannot be examined has no aliases to offer. Reporting
+      // none is accurate and keeps a folder choice from failing outright.
+      return [];
+    }
   });
 
   ipcMain.handle(
