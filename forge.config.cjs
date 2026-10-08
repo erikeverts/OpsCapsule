@@ -1,3 +1,4 @@
+const fs = require("node:fs/promises");
 const path = require("node:path");
 const { flipFuses, FuseV1Options, FuseVersion } = require("@electron/fuses");
 
@@ -66,6 +67,20 @@ module.exports = {
             "..",
             platform === "win32" ? "electron.exe" : "electron",
           );
+      if (platform === "linux") {
+        // Installed as the command on PATH, so starting OpsCapsule arranges
+        // its own session on a host that has none rather than asking the user
+        // to assemble one.
+        // Named so it cannot collide with the OpsCapsule binary beside it on
+        // a case-insensitive filesystem. The command on PATH stays
+        // "opscapsule" regardless, since the package name decides that.
+        const launcher = path.join(buildPath, "..", "..", "opscapsule-launcher");
+        await fs.copyFile(
+          path.join(__dirname, "build", "linux-launcher.sh"),
+          launcher,
+        );
+        await fs.chmod(launcher, 0o755);
+      }
       await flipFuses(executablePath, {
         version: FuseVersion.V1,
         strictlyRequireAllFuses: true,
@@ -87,8 +102,64 @@ module.exports = {
   },
   makers: [
     {
+      // Linux ships as a zip rather than a package: it is unpacked and run
+      // without root, which is what a WSL installation wants, and it avoids
+      // depending on dpkg or rpmbuild being present to build it.
       name: "@electron-forge/maker-zip",
-      platforms: ["darwin"],
+      platforms: ["darwin", "linux"],
+    },
+    {
+      // A package rather than only an archive, so the shared libraries
+      // Electron needs are resolved by apt instead of discovered one
+      // "cannot open shared object file" at a time.
+      name: "@electron-forge/maker-deb",
+      platforms: ["linux"],
+      config: {
+        options: {
+          // The package is named in lower case, as Debian requires, while the
+          // binary keeps the product's capitalisation set by executableName.
+          // Without saying so the maker looks for a binary named after the
+          // package and fails.
+          name: "opscapsule",
+          // The command on PATH is the launcher, which hands over to the
+          // Electron binary beside it.
+          bin: "opscapsule-launcher",
+          productName: "OpsCapsule",
+          genericName: "Operations Workspace",
+          categories: ["Development", "Utility"],
+          // Declared explicitly rather than left to the maker's defaults,
+          // which have historically lagged what Electron actually links
+          // against. Verified in CI against a minimal image.
+          depends: [
+            // What OpsCapsule needs, not only what Electron needs. Enforced
+            // isolation uses bubblewrap, the credential broker reaches the
+            // main process with curl, and the sandbox preflight requires
+            // ripgrep. Leaving these to a separate instruction meant a user
+            // could install the package and still not be able to launch a
+            // capsule.
+            "bubblewrap",
+            "socat",
+            "ripgrep",
+            "curl",
+            // Credential storage refuses to run without a keyring rather than
+            // store secrets unprotected, so one is required rather than
+            // suggested. Either provider satisfies it.
+            "gnome-keyring | kwalletmanager",
+            "libgtk-3-0",
+            "libnotify4",
+            "libnss3",
+            "libnspr4",
+            "libxtst6",
+            "libatspi2.0-0",
+            "libdrm2",
+            "libgbm1",
+            "libxkbcommon0",
+            "libasound2t64 | libasound2",
+            "libsecret-1-0",
+            "xdg-utils",
+          ],
+        },
+      },
     },
     {
       name: "@electron-forge/maker-dmg",

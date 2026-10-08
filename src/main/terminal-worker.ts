@@ -7,6 +7,10 @@ import {
   resetSandboxRuntime,
   wrapSandboxedLaunch,
 } from "./isolation/sandbox-command.js";
+import {
+  describeSandboxFailure,
+  explainProbeFailure,
+} from "./isolation/sandbox-diagnostics.js";
 import type { PreparedIsolation } from "./isolation/types.js";
 import type {
   TerminalWorkerRequest,
@@ -20,6 +24,10 @@ if (!parentPort) {
 
 const terminals = new Map<string, pty.IPty>();
 const executeFile = promisify(execFile);
+
+// Used both to test the agent command and, when that fails, to test whether
+// the sandbox can run anything at all.
+const PROBE_COMMAND = "/bin/test";
 let isolation: PreparedIsolation["execution"] | undefined;
 let shuttingDown = false;
 let emptyWaiter: (() => void) | undefined;
@@ -52,6 +60,39 @@ async function initialize(
   post({ type: "ready" });
 }
 
+/**
+ * Runs `test -x <target>` inside the sandbox. Returns nothing on success, or
+ * whatever the failure said, since discarding that leaves no way to tell why
+ * a capsule would not start.
+ */
+async function probeInsideSandbox(
+  target: string,
+  request: Extract<TerminalWorkerRequest, { type: "start-terminal" }>,
+  commandId: string,
+): Promise<string | undefined> {
+  try {
+    const probe = await wrapSandboxedLaunch(
+      {
+        command: PROBE_COMMAND,
+        args: ["-x", target],
+        cwd: request.launchSpec.cwd,
+        env: request.launchSpec.env,
+      },
+      commandId,
+    );
+    await executeFile(probe.command, probe.args, {
+      cwd: probe.cwd,
+      env: probe.env,
+      timeout: 10_000,
+    });
+    return undefined;
+  } catch (error) {
+    return explainProbeFailure(error);
+  } finally {
+    cleanupSandboxCommand();
+  }
+}
+
 async function startTerminal(
   request: Extract<TerminalWorkerRequest, { type: "start-terminal" }>,
 ): Promise<void> {
@@ -66,27 +107,30 @@ async function startTerminal(
   }
 
   if (request.verifyExecutable && isolation.backend === "sandbox-runtime") {
-    const probe = await wrapSandboxedLaunch(
-      {
-        command: "/bin/test",
-        args: ["-x", request.launchSpec.command],
-        cwd: request.launchSpec.cwd,
-        env: request.launchSpec.env,
-      },
+    const failure = await probeInsideSandbox(
+      request.launchSpec.command,
+      request,
       `${request.terminalId}-executable-probe`,
     );
-    try {
-      await executeFile(probe.command, probe.args, {
-        cwd: probe.cwd,
-        env: probe.env,
-        timeout: 10_000,
-      });
-    } catch {
-      throw new Error(
-        `Agent command '${request.launchSpec.command}' exists but is not reachable inside this target's sandbox`,
+    if (failure) {
+      // A failed probe has two very different causes: the command is not
+      // reachable, or the sandbox could not start at all. Probing the prober
+      // tells them apart, and they need different fixes.
+      const sandboxItself = await probeInsideSandbox(
+        PROBE_COMMAND,
+        request,
+        `${request.terminalId}-sandbox-probe`,
       );
-    } finally {
-      cleanupSandboxCommand();
+      if (sandboxItself) {
+        throw new Error(
+          `The sandbox could not start on this host, so '${request.launchSpec.command}' ` +
+            `was not launched. ${describeSandboxFailure(sandboxItself)}`,
+        );
+      }
+      throw new Error(
+        `Agent command '${request.launchSpec.command}' exists but is not reachable ` +
+          `inside this target's sandbox. ${failure}`,
+      );
     }
   }
   const launchSpec = isolation.backend === "sandbox-runtime"

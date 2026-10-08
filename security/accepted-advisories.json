@@ -1,0 +1,12 @@
+{
+  "comment": "Advisories accepted for runtime dependencies, each with a reason and a date it must be reviewed again. An acceptance that expires fails the build, so nothing stays accepted by forgetting about it.",
+  "accepted": [
+    {
+      "id": "GHSA-86w9-cpqp-85rv",
+      "package": "node-forge",
+      "url": "https://github.com/advisories/GHSA-86w9-cpqp-85rv",
+      "expires": "2026-12-15",
+      "reason": "No fixed version exists: the advisory covers every published release, and npm's only remedy is downgrading @anthropic-ai/sandbox-runtime to 0.0.50, which would regress the isolation backend. The flaw is in RSA PKCS#1 v1.5 signature verification. node-forge reaches us only through the sandbox runtime's MITM certificate authority, which uses it to mint a CA and leaf certificates; its verification functions are not called on that path. Reassess when node-forge publishes a fix or the sandbox runtime drops it."
+    }
+  ]
+}
