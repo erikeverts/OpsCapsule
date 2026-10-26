@@ -16,6 +16,146 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  linux:
+    name: Linux ${{ matrix.architecture }} build
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 30
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - architecture: x64
+            runner: ubuntu-latest
+          - architecture: arm64
+            runner: ubuntu-24.04-arm
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version-file: ".node-version"
+          cache: npm
+
+      # The sandbox acceptance tests need ripgrep, and enforced isolation on
+      # Linux needs bwrap and socat at runtime. Installing them here keeps the
+      # build host honest about what a user will need.
+      - name: Install isolation runtime dependencies
+        run: |
+          sudo apt-get update
+          # fakeroot and dpkg build the package; the rest are what a capsule
+          # needs at runtime and are installed so the tests exercise them.
+          sudo apt-get install -y ripgrep bubblewrap socat fakeroot dpkg
+
+      # Native modules are rebuilt for Electron's ABI, so this cannot be
+      # cross-built from another platform.
+      - name: Install locked dependencies
+        run: npm ci
+
+      - name: Audit runtime dependencies
+        run: npm run audit:runtime
+
+      - name: Run automated tests
+        run: npm test
+
+      - name: Build distributables
+        id: artifacts
+        shell: bash
+        run: |
+          npm run make
+          version="$(node -p "require('./package.json').version")"
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      # Named like the macOS artifact, minus the signing suffix: nothing here
+      # is signed, and implying otherwise would be worse than saying nothing.
+      - name: Retain workflow artifacts
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: opscapsule-${{ steps.artifacts.outputs.version }}-linux-${{ matrix.architecture }}
+          path: |
+            out/make/**/*.zip
+            out/make/**/*.deb
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+
+      # Electron links against system libraries that a minimal installation
+      # does not have, which surfaces as "cannot open shared object file" on
+      # first run. The runner image is not minimal, so the package is checked
+      # against one that is.
+      - name: Verify the package declares every library it needs
+        if: matrix.architecture == 'x64'
+        shell: bash
+        run: |
+          package="$(find out/make -name '*.deb' -print -quit)"
+          docker run --rm -v "${PWD}:/work" -w /work ubuntu:24.04 bash -euc '
+            apt-get update -qq
+            DEBIAN_FRONTEND=noninteractive apt-get install -y -qq ./'"${package}"' >/dev/null
+            # Resolve through the command the package installs rather than
+            # assuming where it put the files.
+            launcher="$(readlink -f "$(command -v opscapsule)")"
+            # The command on PATH is a shell script, and ldd reports a script
+            # as "not a dynamic executable" without listing anything, so
+            # checking it instead of the binary would pass while testing
+            # nothing.
+            binary="$(dirname "${launcher}")/OpsCapsule"
+            [ -x "${binary}" ] || { echo "no binary beside the launcher"; exit 1; }
+            echo "installed launcher: ${launcher}"
+            echo "installed binary: ${binary}"
+            # Reads the ELF magic rather than calling file, which the minimal
+            # image does not ship.
+            head -c 4 "${binary}" | grep -aq "ELF" \
+              || { echo "binary under test is not an ELF executable"; exit 1; }
+            missing="$(ldd "${binary}" 2>/dev/null | grep "not found" || true)"
+            if [ -n "${missing}" ]; then
+              echo "Missing libraries after install:"; echo "${missing}"; exit 1
+            fi
+            echo "every linked library resolves after apt install"
+            # Installing the package must be enough to launch a capsule, not
+            # just enough to start the window.
+            for tool in bwrap socat rg curl; do
+              command -v "${tool}" >/dev/null || { echo "missing ${tool}"; exit 1; }
+            done
+            echo "isolation and broker tools present after apt install"
+            # The seccomp helper is a native executable. Packed into the asar
+            # it would still be listed but could not be run, and the failure
+            # would only appear when someone started a capsule.
+            seccomp="$(dirname "${binary}")/resources/app.asar.unpacked/node_modules/@anthropic-ai/sandbox-runtime/vendor/seccomp"
+            case "$(dpkg --print-architecture)" in
+              amd64) helper="${seccomp}/x64/apply-seccomp" ;;
+              arm64) helper="${seccomp}/arm64/apply-seccomp" ;;
+              *) echo "unexpected architecture"; exit 1 ;;
+            esac
+            [ -x "${helper}" ] || { echo "seccomp helper missing or not executable: ${helper}"; exit 1; }
+            echo "seccomp helper is a real executable outside the asar"
+            # The command on PATH must be the launcher, or a host without a
+            # session bus is back to assembling one by hand.
+            head -n 1 "$(command -v opscapsule)" | grep -q "^#!/bin/sh" \
+              || { echo "opscapsule on PATH is not the launcher"; exit 1; }
+            grep -q "dbus-run-session" "$(command -v opscapsule)" \
+              || { echo "launcher does not arrange a session"; exit 1; }
+            echo "launcher installed as the command on PATH"
+          '
+
+      - name: Verify the build matches the runner
+        shell: bash
+        run: |
+          # A native module built for the wrong architecture produces a package
+          # that only fails when a terminal is opened, so it is checked here.
+          binary="$(find out/make -name '*.zip' -print -quit)"
+          echo "built ${binary}"
+          unzip -o -q "${binary}" -d /tmp/verify
+          file /tmp/verify/*/OpsCapsule | tee /tmp/arch.txt
+          case "${{ matrix.architecture }}" in
+            x64) grep -q "x86-64" /tmp/arch.txt ;;
+            arm64) grep -qE "aarch64|ARM aarch64" /tmp/arch.txt ;;
+          esac
+
   macos-arm64:
     name: macOS arm64 prerelease
     runs-on: macos-15
@@ -61,7 +201,7 @@ jobs:
         run: npm ci
 
       - name: Audit runtime dependencies
-        run: npm audit --omit=dev --audit-level=high
+        run: npm run audit:runtime
 
       # Enforced macOS isolation requires ripgrep at runtime, and the sandbox
       # acceptance test skips itself when it is absent. Installing it here

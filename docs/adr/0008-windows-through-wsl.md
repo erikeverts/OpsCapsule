@@ -93,9 +93,14 @@ works.
 - A keyring must be installed and unlocked inside WSL, which a default
   installation does not have. Without one the credential store refuses to
   store anything, by design.
-- Electron under WSLg may need specific flags, and that is unverified. It is
-  the main technical risk in this decision and should be proven before Linux
-  packaging is called done.
+- Electron under WSLg was the main technical risk in this decision. It has
+  since been confirmed to start without flags on a tester's machine, so the
+  risk is retired. Chromium reports that it cannot reach the system D-Bus,
+  which WSL does not run; nothing OpsCapsule depends on uses that bus.
+- The session bus is a different matter. The keyring is reached over it, so
+  OpsCapsule has to run inside a session that also runs the keyring, and the
+  credential store distinguishes a missing session from a missing keyring
+  because they need different fixes.
 - Windows users who will not run WSL are not served. That is accepted: a build
   without enforced isolation would carry the product's name without its
   property.
