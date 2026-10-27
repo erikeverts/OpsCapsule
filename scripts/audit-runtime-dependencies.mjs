@@ -61,13 +61,48 @@ const [report, acceptedFile] = await Promise.all([
   readFile(new URL("../security/accepted-advisories.json", import.meta.url), "utf8"),
 ]);
 
-const today = new Date();
-const accepted = new Map(
-  JSON.parse(acceptedFile).accepted.map((entry) => [entry.id, entry]),
-);
+const acceptedDocument = JSON.parse(acceptedFile);
+if (!Array.isArray(acceptedDocument.accepted)) {
+  throw new Error("security/accepted-advisories.json needs an 'accepted' array.");
+}
+
+const invalid = acceptedDocument.accepted.filter((entry) => {
+  if (
+    !entry ||
+    typeof entry.id !== "string" ||
+    typeof entry.package !== "string" ||
+    typeof entry.reason !== "string" ||
+    entry.reason.trim() === "" ||
+    typeof entry.expires !== "string" ||
+    !/^\d{4}-\d{2}-\d{2}$/.test(entry.expires)
+  ) {
+    return true;
+  }
+  return (
+    new Date(`${entry.expires}T00:00:00.000Z`).toISOString().slice(0, 10) !==
+    entry.expires
+  );
+});
+if (invalid.length > 0) {
+  console.error(
+    "Every acceptance needs a valid id, package, non-empty reason, and YYYY-MM-DD expiry.",
+  );
+  process.exit(1);
+}
+
+const accepted = new Map();
+for (const entry of acceptedDocument.accepted) {
+  if (accepted.has(entry.id)) {
+    console.error(`Duplicate advisory acceptance: ${entry.id}`);
+    process.exit(1);
+  }
+  accepted.set(entry.id, entry);
+}
+
+const today = new Date().toISOString().slice(0, 10);
 
 const expired = [...accepted.values()].filter(
-  (entry) => new Date(entry.expires) < today,
+  (entry) => entry.expires < today,
 );
 if (expired.length > 0) {
   console.error("These acceptances have expired and must be reviewed again:");
@@ -78,6 +113,31 @@ if (expired.length > 0) {
 }
 
 const found = advisoriesFrom(report);
+const foundById = new Map(found.map((advisory) => [advisory.id, advisory]));
+const obsolete = [...accepted.values()].filter(
+  (entry) => !foundById.has(entry.id),
+);
+if (obsolete.length > 0) {
+  console.error("These accepted advisories are no longer reported and must be removed:");
+  for (const entry of obsolete) {
+    console.error(`  ${entry.id} (${entry.package})`);
+  }
+  process.exit(1);
+}
+
+const mismatched = [...accepted.values()].filter(
+  (entry) => foundById.get(entry.id)?.package !== entry.package,
+);
+if (mismatched.length > 0) {
+  console.error("These advisory acceptances name the wrong package:");
+  for (const entry of mismatched) {
+    console.error(
+      `  ${entry.id}: policy names ${entry.package}, audit reports ${foundById.get(entry.id)?.package}`,
+    );
+  }
+  process.exit(1);
+}
+
 const unaccepted = found.filter((advisory) => !accepted.has(advisory.id));
 
 for (const advisory of found) {
