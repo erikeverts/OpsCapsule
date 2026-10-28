@@ -31,6 +31,13 @@ Repository-specific identities are separate mode-0600 files selected by
 generated file, and session cleanup removes it. Repository-local configuration
 retains its normal higher precedence.
 
+`GIT_CONFIG_NOSYSTEM` also prevents platform system configuration from
+reintroducing settings outside the allowlist. On macOS, `/usr/bin/git` is an
+Apple developer-tool shim that writes an `xcrun` cache outside the capsule.
+OpsCapsule resolves the selected direct Git binary in the main process and
+places a session-local `git` shim first on the capsule PATH. The direct binary
+is granted narrow read/execute access; the host temp directory is not exposed.
+
 The application preference defaults to enabled. A workspace manifest records
 only `default`, `enabled`, or `disabled`; it never records the resolved identity.
 There is no target override in the first slice because Git identity belongs to

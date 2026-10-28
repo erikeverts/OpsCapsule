@@ -1,10 +1,19 @@
 import { execFileSync } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, stat } from "node:fs/promises";
+import {
+  chmod,
+  mkdtemp,
+  mkdir,
+  readFile,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import {
   inspectHostGitConfiguration,
+  preferDirectMacOsGitExecutable,
   writeHostGitConfiguration,
   type HostGitConfiguration,
 } from "../src/main/git-config.js";
@@ -33,6 +42,44 @@ function git(args: string[], environment: NodeJS.ProcessEnv): string {
 }
 
 describe("host Git configuration", () => {
+  it("replaces Apple's Git launcher with the selected direct toolchain binary", async () => {
+    const root = await temporaryRoot();
+    const direct = join(root, "developer-git");
+    await writeFile(direct, "direct Git fixture\n");
+    await chmod(direct, 0o755);
+
+    expect(
+      await preferDirectMacOsGitExecutable(
+        "/usr/bin/git",
+        { PATH: "/usr/bin" },
+        "darwin",
+        async () => direct,
+      ),
+    ).toBe(direct);
+  });
+
+  it("leaves non-Apple and non-macOS Git executables unchanged", async () => {
+    const locate = async (): Promise<string> => {
+      throw new Error("must not locate a developer tool");
+    };
+    expect(
+      await preferDirectMacOsGitExecutable(
+        "/opt/homebrew/bin/git",
+        {},
+        "darwin",
+        locate,
+      ),
+    ).toBe("/opt/homebrew/bin/git");
+    expect(
+      await preferDirectMacOsGitExecutable(
+        "/usr/bin/git",
+        {},
+        "linux",
+        locate,
+      ),
+    ).toBe("/usr/bin/git");
+  });
+
   it("asks Git for global and includeIf-resolved repository identities", async () => {
     const root = await temporaryRoot();
     const home = join(root, "home");

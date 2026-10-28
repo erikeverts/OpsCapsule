@@ -171,6 +171,10 @@ export interface RuntimePaths {
   agentInstructions?: string;
   /** Generated allowlisted host Git configuration, when inheritance is on. */
   gitConfig?: string;
+  /** Direct host Git binary selected outside the sandbox. */
+  gitExecutable?: string;
+  /** Session-local command shims placed before the inherited PATH. */
+  toolShimDirectory?: string;
   /**
    * Present only when this capsule brokers credentials. Paths only; no
    * credential value ever crosses the IPC boundary.

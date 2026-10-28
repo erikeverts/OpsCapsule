@@ -85,4 +85,7 @@ email remain host-local and are never written to `workspace.yaml`.
 
 Credential helpers, hooks, SSH commands, signing configuration, arbitrary
 includes, and other Git settings are not imported. SSH authentication and
-commit signing require separate brokered capabilities.
+commit signing require separate brokered capabilities. Platform system Git
+configuration is disabled inside capsules for the same reason; on macOS the
+selected direct Xcode/Command Line Tools Git binary is used so Apple's launcher
+does not need to write outside the capsule-private temporary directory.

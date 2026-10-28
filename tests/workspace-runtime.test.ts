@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -47,9 +54,18 @@ describe("workspace runtime isolation", () => {
     expect(await readFile(runtime.gitConfig!, "utf8")).toContain(
       'email = "operator@example.test"',
     );
-    expect(buildWorkspaceEnvironment(runtime, target).GIT_CONFIG_GLOBAL).toBe(
-      runtime.gitConfig,
-    );
+    const environment = buildWorkspaceEnvironment(runtime, target);
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(runtime.gitConfig);
+    expect(environment.GIT_CONFIG_NOSYSTEM).toBe("1");
+    if (process.platform !== "win32") {
+      expect(runtime.toolShimDirectory).toBe(join(runtime.root, "bin"));
+      expect(await readlink(join(runtime.toolShimDirectory!, "git"))).toBe(
+        "/usr/bin/git",
+      );
+      expect(environment.PATH?.split(":")[0]).toBe(
+        runtime.toolShimDirectory,
+      );
+    }
 
     await cleanupWorkspaceRuntime(runtime);
     await expect(readFile(runtime.gitConfig!, "utf8")).rejects.toMatchObject({

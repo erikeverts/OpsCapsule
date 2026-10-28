@@ -1,6 +1,7 @@
 import { execFile } from "node:child_process";
-import { mkdir, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { constants } from "node:fs";
+import { access, mkdir, symlink, writeFile } from "node:fs/promises";
+import { dirname, isAbsolute, join } from "node:path";
 import type { WorkspaceDirectory } from "../shared/workspace-schema.js";
 import { resolveExecutable } from "./runtime-adapters/readiness.js";
 
@@ -26,6 +27,10 @@ export type HostGitConfigurationInspector = (
   directories: readonly WorkspaceDirectory[],
   environment?: NodeJS.ProcessEnv,
 ) => Promise<HostGitConfiguration>;
+
+export type HostGitExecutableResolver = (
+  environment?: NodeJS.ProcessEnv,
+) => Promise<string>;
 
 interface GitExecutionError extends Error {
   code?: string | number;
@@ -75,6 +80,51 @@ async function runGit(
       },
     );
   });
+}
+
+type MacOsDeveloperGitLocator = (
+  environment: NodeJS.ProcessEnv,
+) => Promise<string>;
+
+async function locateMacOsDeveloperGit(
+  environment: NodeJS.ProcessEnv,
+): Promise<string> {
+  return runGit("/usr/bin/xcrun", ["--find", "git"], environment);
+}
+
+/**
+ * Apple's /usr/bin/git is a toolchain shim. It asks xcrun to write a cache in
+ * the host's Darwin user temp directory, which is intentionally outside a
+ * capsule. Resolve the selected toolchain while still in the main process so
+ * the capsule can execute the real binary without widening filesystem access.
+ */
+export async function preferDirectMacOsGitExecutable(
+  executable: string,
+  environment: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  locateDeveloperGit: MacOsDeveloperGitLocator = locateMacOsDeveloperGit,
+): Promise<string> {
+  if (platform !== "darwin" || executable !== "/usr/bin/git") {
+    return executable;
+  }
+  const direct = await locateDeveloperGit(environment);
+  if (!isAbsolute(direct) || direct === executable) {
+    throw new Error("xcrun did not return a direct Git toolchain executable");
+  }
+  await access(direct, constants.X_OK);
+  return direct;
+}
+
+export async function resolveHostGitExecutable(
+  inheritedEnvironment: NodeJS.ProcessEnv = process.env,
+): Promise<string> {
+  const environment = hostGitEnvironment(inheritedEnvironment);
+  const executable = await resolveExecutable(
+    "git",
+    { PATH: environment.PATH ?? "" },
+    process.cwd(),
+  );
+  return preferDirectMacOsGitExecutable(executable, environment);
 }
 
 async function optionalConfigValue(
@@ -145,13 +195,11 @@ export async function inspectHostGitConfiguration(
   const environment = hostGitEnvironment(inheritedEnvironment);
   let executable: string;
   try {
-    executable = await resolveExecutable(
-      "git",
-      { PATH: environment.PATH ?? "" },
-      process.cwd(),
-    );
+    executable = await resolveHostGitExecutable(environment);
   } catch {
-    throw new Error("Git is not available in the host executable search path.");
+    throw new Error(
+      "A directly executable Git installation is not available in the host toolchain.",
+    );
   }
   const [global, candidates] = await Promise.all([
     identityFor(executable, [], environment, ["--global"]),
@@ -298,4 +346,15 @@ export async function writeHostGitConfiguration(
     mode: 0o600,
   });
   return destination;
+}
+
+/** Put only Git, not the whole developer toolchain, at the front of PATH. */
+export async function writeGitExecutableShim(
+  runtimeRoot: string,
+  executable: string,
+): Promise<string> {
+  const directory = join(runtimeRoot, "bin");
+  await mkdir(directory, { recursive: true, mode: 0o700 });
+  await symlink(executable, join(directory, "git"));
+  return directory;
 }

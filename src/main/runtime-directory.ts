@@ -14,7 +14,14 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { dirname, isAbsolute, join, relative, resolve } from "node:path";
+import {
+  delimiter,
+  dirname,
+  isAbsolute,
+  join,
+  relative,
+  resolve,
+} from "node:path";
 import { stringify } from "yaml";
 import type { RuntimePaths } from "../shared/contracts.js";
 import type { KubernetesContext } from "../shared/workspace-schema.js";
@@ -40,7 +47,10 @@ import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 import { resolveConfiguredPath } from "./workspace-registry.js";
 import {
   inspectHostGitConfiguration,
+  resolveHostGitExecutable,
+  writeGitExecutableShim,
   writeHostGitConfiguration,
+  type HostGitExecutableResolver,
   type HostGitConfigurationInspector,
 } from "./git-config.js";
 
@@ -346,6 +356,7 @@ async function writeShellConfiguration(
 export interface WorkspaceRuntimeOptions {
   readonly inheritHostGitConfig?: boolean;
   readonly inspectHostGitConfiguration?: HostGitConfigurationInspector;
+  readonly resolveHostGitExecutable?: HostGitExecutableResolver;
 }
 
 export async function createWorkspaceRuntime(
@@ -472,18 +483,38 @@ export async function createWorkspaceRuntime(
   ]);
 
   let gitConfig: string | undefined;
+  let gitExecutable: string | undefined;
   if (options.inheritHostGitConfig) {
     try {
       const inspect =
         options.inspectHostGitConfiguration ?? inspectHostGitConfiguration;
-      gitConfig = await writeHostGitConfiguration(
-        root,
-        await inspect(resolvedTarget.directories),
-      );
+      const configuration = await inspect(resolvedTarget.directories);
+      gitExecutable = configuration.executable;
+      gitConfig = await writeHostGitConfiguration(root, configuration);
     } catch {
       // Git identity is a readiness warning rather than a launch condition.
       // The host may have changed between readiness and launch, so preserve
       // that policy here instead of turning the warning into a hidden block.
+    }
+  }
+  // The production caller always supplies the resolved inheritance boolean.
+  // Undefined preserves library/test callers that do not expect host lookup.
+  if (options.inheritHostGitConfig !== undefined && !gitExecutable) {
+    try {
+      const resolveGit =
+        options.resolveHostGitExecutable ?? resolveHostGitExecutable;
+      gitExecutable = await resolveGit();
+    } catch {
+      // Readiness already reports unavailable Git. A capsule remains useful
+      // for non-Git work, so failure to prepare this convenience is nonfatal.
+    }
+  }
+  let toolShimDirectory: string | undefined;
+  if (gitExecutable && process.platform !== "win32") {
+    try {
+      toolShimDirectory = await writeGitExecutableShim(root, gitExecutable);
+    } catch {
+      // The original PATH remains available if the shim cannot be created.
     }
   }
 
@@ -496,6 +527,8 @@ export async function createWorkspaceRuntime(
     targetState,
     agentState,
     ...(gitConfig ? { gitConfig } : {}),
+    ...(gitExecutable ? { gitExecutable } : {}),
+    ...(toolShimDirectory ? { toolShimDirectory } : {}),
     ...(agentInstructions ? { agentInstructions } : {}),
     ...(brokerSocket ? { brokerSocket } : {}),
     ...(brokerHelper ? { brokerHelper } : {}),
@@ -592,8 +625,19 @@ export function buildWorkspaceEnvironment(
     TEMP: runtime.temp,
     CLAUDE_CODE_TMPDIR: runtime.temp,
     KUBECONFIG: runtime.kubeconfig,
+    // GIT_CONFIG_GLOBAL replaces the user's global file, but Git otherwise
+    // still reads a platform system file. macOS puts osxkeychain there, which
+    // would silently reintroduce a credential helper into the capsule.
+    GIT_CONFIG_NOSYSTEM: "1",
     ...(runtime.gitConfig
       ? { GIT_CONFIG_GLOBAL: runtime.gitConfig }
+      : {}),
+    ...(runtime.toolShimDirectory
+      ? {
+          PATH: [runtime.toolShimDirectory, environment.PATH]
+            .filter(Boolean)
+            .join(delimiter),
+        }
       : {}),
     OPSCAPSULE_WORKSPACE: resolvedTarget.workspace.manifest.metadata.id,
     OPSCAPSULE_TARGET: resolvedTarget.target.id,
