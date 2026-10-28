@@ -43,6 +43,9 @@ jobs:
       - name: Install dependencies
         run: npm ci --ignore-scripts
 
+      - name: Audit runtime dependencies
+        run: npm run audit:runtime
+
       - name: Build and type-check
         run: npm run build
 

@@ -160,10 +160,22 @@ hardened runtime entitlements, notarize and staple the app/DMG, and test the
 downloaded artifact on a clean machine. Windows and Linux makers, signing, and
 package-level smoke tests remain separate platform slices.
 
-The runtime dependency audit is clean (`npm audit --omit=dev`). At the time this
-foundation was added, the latest Electron Forge 7 toolchain still reported
-development-only advisories through its packaging and legacy DMG dependencies.
-Those packages are not included in the application, but they do execute while a
-release is built. Release jobs therefore run on isolated, ephemeral runners,
-and the toolchain advisories must be reviewed again before trusted production
-publishing.
+Runtime dependencies are checked in both CI and the release workflow with
+`npm run audit:runtime`. High and critical advisories fail the build unless the
+specific advisory is recorded in `security/accepted-advisories.json` with a
+reachability assessment and a review deadline. Unknown advisories and expired
+or obsolete acceptances fail closed; the severity threshold is never lowered to
+make one dependency pass.
+
+The Sandbox Runtime currently reaches `node-forge` only through its certificate
+generation path, while the outstanding advisory affects signature verification.
+That advisory is accepted temporarily with its reasoning and deadline in the
+policy file. Sandbox Runtime's Zod dependency is forced to reuse OpsCapsule's
+patched Zod 4 version; the runtime imports the documented `zod/v3` compatibility
+surface, so a vulnerable private Zod 3 copy is not shipped.
+
+Electron Forge still reports development-only advisories through packaging and
+legacy DMG dependencies. Those packages are not included in the application,
+but they execute while a release is built. Release jobs therefore run on
+isolated, ephemeral runners, and the toolchain advisories must be reviewed again
+before trusted production publishing.
