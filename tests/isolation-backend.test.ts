@@ -1,6 +1,6 @@
 import { execFile } from "node:child_process";
 import { spawnSync } from "node:child_process";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
@@ -211,6 +211,85 @@ describe.skipIf(!macOsSandboxAvailable)(
           executeFile(deniedLaunch.command, deniedLaunch.args, {
             cwd: deniedLaunch.cwd,
             env: deniedLaunch.env,
+          }),
+        ).rejects.toMatchObject({ code: 1 });
+        cleanupSandboxCommand();
+        await resetSandboxRuntime();
+      },
+      20_000,
+    );
+
+    it(
+      "can execute one explicitly allowed user-local agent without exposing its siblings",
+      async () => {
+        const temporaryRoot = "/private/tmp";
+        const base = await mkdtemp(join(temporaryRoot, "oc-local-agent-"));
+        temporaryDirectories.push(base);
+        const install = join(base, "share", "claude", "versions");
+        const root = join(base, "runtime");
+        const home = join(root, "home");
+        const sessionTemp = join(root, "tmp");
+        const targetState = join(base, "target-state");
+        await Promise.all(
+          [install, home, sessionTemp, targetState].map((path) =>
+            mkdir(path, { recursive: true }),
+          ),
+        );
+        const agent = join(install, "1.0.0");
+        const sibling = join(install, "private.txt");
+        await writeFile(agent, "#!/bin/sh\nprintf 'local-agent-ok\\n'\n");
+        await chmod(agent, 0o755);
+        await writeFile(sibling, "private\n");
+        const runtime = {
+          root,
+          home,
+          temp: sessionTemp,
+          kubeconfig: join(root, "kubeconfig.yaml"),
+          sandboxConfig: join(root, "sandbox.json"),
+          targetState,
+          agentState: join(targetState, "agents", "example"),
+        };
+        const isolation = await new SandboxRuntimeIsolationBackend({
+          runtime,
+          readOnlyPaths: [],
+          runtimeReadOnlyPaths: [agent],
+          readWritePaths: [targetState],
+          network: { mode: "deny", allowedDomains: [] },
+        }).prepare();
+        if (isolation.execution.backend !== "sandbox-runtime") {
+          throw new Error("Expected Sandbox Runtime execution");
+        }
+        expect(isolation.effective.readOnlyPaths).not.toContain(agent);
+        await initializeSandboxRuntime(isolation.execution);
+        const launch = await wrapSandboxedLaunch(
+          {
+            command: agent,
+            args: [],
+            cwd: targetState,
+            env: { ...process.env, HOME: home } as Record<string, string>,
+          },
+          "user-local-agent",
+        );
+        const result = await executeFile(launch.command, launch.args, {
+          cwd: launch.cwd,
+          env: launch.env,
+        });
+        cleanupSandboxCommand();
+        expect(result.stdout).toBe("local-agent-ok\n");
+
+        const denied = await wrapSandboxedLaunch(
+          {
+            command: "/bin/cat",
+            args: [sibling],
+            cwd: targetState,
+            env: { ...process.env, HOME: home } as Record<string, string>,
+          },
+          "user-local-agent-sibling",
+        );
+        await expect(
+          executeFile(denied.command, denied.args, {
+            cwd: denied.cwd,
+            env: denied.env,
           }),
         ).rejects.toMatchObject({ code: 1 });
         cleanupSandboxCommand();

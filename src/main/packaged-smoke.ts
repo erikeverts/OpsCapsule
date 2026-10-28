@@ -1,4 +1,5 @@
-import { platform } from "node:os";
+import { homedir, platform } from "node:os";
+import { delimiter, join } from "node:path";
 import type { UtilityProcess } from "electron";
 import { utilityProcess } from "electron";
 import {
@@ -7,6 +8,7 @@ import {
 } from "./terminal-worker-protocol.js";
 
 const expectedOutput = "opscapsule-packaged-worker-ok";
+const expectedUserLocalBin = join(homedir(), ".local", "bin");
 
 function processEnvironment(): Record<string, string> {
   return Object.fromEntries(
@@ -64,15 +66,18 @@ export function verifyPackagedTerminalWorker(
       }
       if (message.type === "ready") {
         const windows = platform() === "win32";
+        const smokeTool = environment.OPSCAPSULE_SMOKE_TOOL;
         worker?.postMessage({
           type: "start-terminal",
           terminalId: "packaged-verification",
           verifyExecutable: false,
           launchSpec: {
-            command: windows ? "cmd.exe" : "/bin/sh",
-            args: windows
-              ? ["/d", "/s", "/c", `echo ${expectedOutput}`]
-              : ["-lc", `printf '${expectedOutput}\\n'`],
+            command: smokeTool ?? (windows ? "cmd.exe" : "/bin/sh"),
+            args: smokeTool
+              ? []
+              : windows
+                ? ["/d", "/s", "/c", `echo ${expectedOutput}`]
+                : ["-lc", `printf '${expectedOutput}\\n'`],
             cwd,
             env: environment,
           },
@@ -90,10 +95,15 @@ export function verifyPackagedTerminalWorker(
         return;
       }
       if (message.type === "terminal-exit") {
-        if (message.exitCode !== 0 || !output.includes(expectedOutput)) {
+        const path = environment.PATH?.split(delimiter) ?? [];
+        if (
+          message.exitCode !== 0 ||
+          !output.includes(expectedOutput) ||
+          !path.includes(expectedUserLocalBin)
+        ) {
           fail(
             new Error(
-              `Unexpected packaged terminal result (${message.exitCode}): ${JSON.stringify(output)}`,
+              `Unexpected packaged terminal result (${message.exitCode}); PATH contains user-local tools: ${path.includes(expectedUserLocalBin)}: ${JSON.stringify(output)}`,
             ),
           );
           return;

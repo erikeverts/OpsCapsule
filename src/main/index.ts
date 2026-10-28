@@ -80,6 +80,7 @@ import {
   RENDERER_URL,
   resolveRendererAssetPath,
 } from "./renderer-protocol.js";
+import { initializeHostToolEnvironment } from "./host-tools.js";
 
 app.setName("OpsCapsule");
 protocol.registerSchemesAsPrivileged([
@@ -512,6 +513,11 @@ void app
     if (!hasSingleInstanceLock) {
       return;
     }
+    await initializeHostToolEnvironment(
+      isPackagedSmokeTest
+        ? { loadLoginShellPath: async () => undefined }
+        : {},
+    );
     await cleanupStaleWorkspaceRuntimes(app.getPath("userData"));
     registerRendererProtocol();
     if (process.platform === "darwin") {

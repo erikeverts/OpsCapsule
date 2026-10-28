@@ -4,6 +4,7 @@ import { ContextOnlyIsolation } from "./context-only.js";
 import { resolvePathChain } from "./path-chain.js";
 import { SandboxRuntimeIsolationBackend } from "./sandbox-runtime.js";
 import type { PreparedIsolation } from "./types.js";
+import { resolveExecutableWithSource } from "../runtime-adapters/readiness.js";
 
 export async function prepareIsolation(
   runtime: RuntimePaths,
@@ -45,9 +46,26 @@ export async function prepareIsolation(
     );
   }
 
+  const configuredCommand = resolvedTarget.agent.profile.runtime.command;
+  const command = configuredCommand === "$SHELL"
+    ? process.env.SHELL ?? (process.platform === "win32" ? "cmd.exe" : "/bin/sh")
+    : configuredCommand;
+  const agentExecutable = await resolveExecutableWithSource(
+    command,
+    { PATH: process.env.PATH ?? "" },
+    resolvedTarget.defaultDirectory.path,
+  );
+  // A user-local native agent is commonly a symlink such as
+  // ~/.local/bin/claude -> ~/.local/share/claude/versions/<version>. The
+  // capsule needs the launcher and payload, but never the rest of the home
+  // directory. Resolving the chain keeps that grant as narrow as the command
+  // selected by the profile.
+  const agentExecutablePaths = await resolvePathChain(agentExecutable.source);
+
   return new SandboxRuntimeIsolationBackend({
     runtime,
     readOnlyPaths,
+    runtimeReadOnlyPaths: agentExecutablePaths,
     readWritePaths: [...readWritePaths, runtime.targetState],
     network: resolvedTarget.target.isolation.network,
     brokerSocket: runtime.brokerSocket,

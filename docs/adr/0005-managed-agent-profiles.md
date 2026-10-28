@@ -96,6 +96,14 @@ variables from the host login shell. Literal profile environment values are stor
 as plaintext and are therefore for non-secret settings only. Profile values cannot
 override OpsCapsule-managed identity, home, temporary, or state variables.
 
+On macOS and Linux, `PATH` is the one value OpsCapsule may read from the user's
+bounded interactive login shell. GUI application launches otherwise omit common
+Homebrew and user-local locations. The discovered value is merged with safe
+platform defaults and used consistently by readiness and launch. If an agent
+executable resolves below a denied user-data root, its launcher and symbolic-link
+chain are added as narrow read-only sandbox resources; the surrounding home
+directory is not exposed.
+
 This keeps agent and model-provider choices separate. For example, an OpenCode
 profile can contain non-secret Bedrock model settings while authentication comes
 from the target's isolated AWS connection and target-specific AWS state. Another

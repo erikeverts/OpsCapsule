@@ -213,6 +213,12 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
   async prepare(): Promise<PreparedIsolation> {
     await checkSandboxRuntimeAvailability();
     const readOnlyPaths = [...new Set(this.context.readOnlyPaths)];
+    const sandboxReadOnlyPaths = [
+      ...new Set([
+        ...readOnlyPaths,
+        ...(this.context.runtimeReadOnlyPaths ?? []),
+      ]),
+    ];
     const readWritePaths = [
       ...new Set([
         ...this.context.readWritePaths,
@@ -222,7 +228,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
     ];
     const settings = buildSandboxRuntimeSettings({
       deniedReadPaths: await deniedUserDataRoots(),
-      readOnlyPaths,
+      readOnlyPaths: sandboxReadOnlyPaths,
       readWritePaths,
       network: this.context.network,
       userHome: homedir(),

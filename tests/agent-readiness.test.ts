@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import {
   prepareAgentLaunch,
   resolveExecutable,
+  resolveExecutableWithSource,
 } from "../src/main/runtime-adapters/readiness.js";
 
 describe("agent command readiness", () => {
@@ -32,6 +33,20 @@ describe("agent command readiness", () => {
     );
 
     expect(isAbsolute(launch.command)).toBe(true);
+  });
+
+  it("retains the launcher path when resolving a symlink", async () => {
+    if (process.platform === "win32") {
+      return;
+    }
+    const resolution = await resolveExecutableWithSource(
+      "sh",
+      { PATH: "/bin:/usr/bin" },
+      process.cwd(),
+    );
+
+    expect(isAbsolute(resolution.executable)).toBe(true);
+    expect(resolution.source.endsWith("/sh")).toBe(true);
   });
 
   it("reports a missing agent command clearly", async () => {

@@ -18,7 +18,14 @@ export interface IsolationBackend {
 
 export interface IsolationPreparationContext {
   runtime: RuntimePaths;
+  /** User-configured roots shown as part of the effective capsule boundary. */
   readOnlyPaths: string[];
+  /**
+   * Narrow application/runtime dependencies required to start the capsule,
+   * such as a user-local agent executable. These enter the sandbox policy but
+   * are not presented as workspace filesystem roots.
+   */
+  runtimeReadOnlyPaths?: string[];
   readWritePaths: string[];
   network: {
     mode: "public" | "deny" | "allowlist";
