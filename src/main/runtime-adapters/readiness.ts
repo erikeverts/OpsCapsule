@@ -30,13 +30,28 @@ export async function resolveExecutable(
   environment: Record<string, string>,
   cwd: string,
 ): Promise<string> {
+  return (await resolveExecutableWithSource(command, environment, cwd)).executable;
+}
+
+export interface ExecutableResolution {
+  /** Canonical path used to launch the executable. */
+  executable: string;
+  /** Path entry as found, retained so sandbox policy can allow its symlink chain. */
+  source: string;
+}
+
+export async function resolveExecutableWithSource(
+  command: string,
+  environment: Record<string, string>,
+  cwd: string,
+): Promise<ExecutableResolution> {
   const hasPathSeparator = command.includes("/") || command.includes("\\");
   if (isAbsolute(command) || hasPathSeparator) {
     const base = isAbsolute(command) ? command : resolve(cwd, command);
     for (const candidate of executableCandidates(base)) {
       const resolved = await executable(candidate);
       if (resolved) {
-        return resolved;
+        return { executable: resolved, source: candidate };
       }
     }
   } else {
@@ -47,7 +62,7 @@ export async function resolveExecutable(
       for (const candidate of executableCandidates(join(directory, command))) {
         const resolved = await executable(candidate);
         if (resolved) {
-          return resolved;
+          return { executable: resolved, source: candidate };
         }
       }
     }

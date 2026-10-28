@@ -1,6 +1,15 @@
 import { execFile, spawn } from "node:child_process";
 import { constants } from "node:fs";
-import { access, mkdtemp, readdir, rm, stat } from "node:fs/promises";
+import {
+  access,
+  chmod,
+  mkdir,
+  mkdtemp,
+  readdir,
+  rm,
+  stat,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { createRequire } from "node:module";
@@ -127,14 +136,26 @@ async function launchSmokeTest() {
   const userDataPath = await mkdtemp(
     path.join(tmpdir(), "opscapsule-packaged-smoke-"),
   );
+  const smokeHome = path.join(userDataPath, "home");
+  const smokeBin = path.join(smokeHome, ".local", "bin");
+  const smokeToolName = "opscapsule-smoke-tool";
+  const smokeTool = path.join(smokeBin, smokeToolName);
   try {
+    await mkdir(smokeBin, { recursive: true });
+    await writeFile(
+      smokeTool,
+      "#!/bin/sh\nprintf 'opscapsule-packaged-worker-ok\\n'\n",
+    );
+    await chmod(smokeTool, 0o755);
     await new Promise((resolve, reject) => {
       const child = spawn(executablePath, [], {
         env: {
           ...process.env,
+          HOME: smokeHome,
           PATH: "/usr/bin:/bin",
           OPSCAPSULE_PACKAGED_SMOKE_TEST: "1",
           OPSCAPSULE_SMOKE_USER_DATA: userDataPath,
+          OPSCAPSULE_SMOKE_TOOL: smokeToolName,
         },
         stdio: ["ignore", "pipe", "pipe"],
       });

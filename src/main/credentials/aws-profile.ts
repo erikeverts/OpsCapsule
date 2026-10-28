@@ -9,12 +9,14 @@ const run = promisify(execFile);
  * out, which would block a capsule launch; on a host with one, it would
  * silently return an identity the user never selected.
  */
-const profileResolutionEnvironment = {
-  ...process.env,
-  AWS_EC2_METADATA_DISABLED: "true",
-  AWS_METADATA_SERVICE_TIMEOUT: "1",
-  AWS_METADATA_SERVICE_NUM_ATTEMPTS: "1",
-};
+function profileResolutionEnvironment(): NodeJS.ProcessEnv {
+  return {
+    ...process.env,
+    AWS_EC2_METADATA_DISABLED: "true",
+    AWS_METADATA_SERVICE_TIMEOUT: "1",
+    AWS_METADATA_SERVICE_NUM_ATTEMPTS: "1",
+  };
+}
 
 /**
  * AWS profiles are not secrets and are not stored by OpsCapsule.
@@ -62,7 +64,7 @@ export async function exportProfileCredentials(
         "--format",
         "process",
       ],
-      { timeout: 30_000, env: profileResolutionEnvironment },
+      { timeout: 30_000, env: profileResolutionEnvironment() },
     );
     const payload = JSON.parse(stdout) as { AccessKeyId?: string };
     if (!payload.AccessKeyId) {
@@ -105,7 +107,7 @@ export async function ssoLogin(profile: string): Promise<void> {
   try {
     await run("aws", ["sso", "login", "--profile", profile], {
       timeout: 180_000,
-      env: profileResolutionEnvironment,
+      env: profileResolutionEnvironment(),
     });
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stderr?: string };
@@ -142,7 +144,7 @@ export async function callerIdentity(profile: string): Promise<CallerIdentity> {
         "--output",
         "json",
       ],
-      { timeout: 20_000, env: profileResolutionEnvironment },
+      { timeout: 20_000, env: profileResolutionEnvironment() },
     );
     const parsed = JSON.parse(stdout) as { Account?: string };
     if (!parsed.Account) {

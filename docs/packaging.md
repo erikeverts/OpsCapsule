@@ -137,6 +137,23 @@ npm run verify:package -- --static-only
 The complete verification must still run in a normal macOS session or release
 CI before an artifact is published.
 
+## Host tool discovery
+
+A packaged application opened from Finder or the Dock does not reliably inherit
+the same executable search path as a terminal. At startup OpsCapsule reads only
+`PATH` from the user's bounded interactive login shell and merges it with safe
+platform defaults. It never imports the rest of the shell environment. The
+fallbacks include Homebrew's Apple Silicon and Intel locations and the standard
+user-local launcher directory `~/.local/bin` used by native Claude Code.
+
+The resulting path is the single source for readiness checks, AWS credential
+resolution, sandbox prerequisites, agent launch, and capsule shells. Relative
+entries are discarded. If the selected agent is installed below the user's home
+directory, enforced isolation grants read access only to the resolved launcher
+and its symbolic-link chain. For example, native Claude Code exposes
+`~/.local/bin/claude` as a link to one versioned executable below
+`~/.local/share/claude/versions`; the rest of the home directory stays denied.
+
 ## Package structure and hardening
 
 - Application JavaScript is stored in `app.asar`.
