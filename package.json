@@ -19,6 +19,10 @@
   "engines": {
     "node": "24.x"
   },
+  "allowScripts": {
+    "fs-xattr@0.3.1": true,
+    "macos-alias@0.2.12": true
+  },
   "scripts": {
     "check:node": "node scripts/check-node-version.mjs",
     "clean": "node scripts/clean.mjs",
@@ -38,6 +42,7 @@
     "verify:terminal-worker": "npm run build:main && electron scripts/verify-terminal-worker.cjs",
     "preverify:package": "npm run check:node",
     "verify:package": "node scripts/verify-packaged-app.mjs",
+    "verify:release-toolchain": "node --input-type=commonjs -e \"require('appdmg')\"",
     "verify:release-tag": "node scripts/verify-release-tag.mjs",
     "prepare:release": "node scripts/prepare-release-artifacts.mjs",
     "start": "npm run build && electron .",

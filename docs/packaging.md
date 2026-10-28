@@ -82,6 +82,13 @@ tests, builds the DMG and ZIP, launches the packaged application as a smoke
 test, verifies both distributable containers, writes `SHA256SUMS.txt`, and
 attests the two application artifacts before publishing them.
 
+The DMG maker uses `appdmg`, which includes the native `fs-xattr` and
+`macos-alias` modules. Their exact versions are approved in `allowScripts` in
+`package.json`; do not replace that narrow allowlist with npm's
+`dangerously-allow-all-scripts` escape hatch. The release workflow loads the
+DMG toolchain immediately after `npm ci` so a missing or unbuilt native module
+fails before tests and packaging consume runner time.
+
 A release tag must exactly match the version in `package.json`, and its commit
 must be contained in `main`. For example, after a version change has been
 reviewed and merged:
