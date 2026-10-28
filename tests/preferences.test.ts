@@ -37,21 +37,43 @@ describe("theme resolution", () => {
     // broken at night.
     expect(defaultPreferences.theme).toBe("system");
   });
+
+  it("inherits safe host Git configuration by default", () => {
+    expect(defaultPreferences.inheritHostGitConfig).toBe(true);
+  });
 });
 
 describe("preferences storage", () => {
   it("round-trips and writes readable JSON", async () => {
     const { base, store: preferences } = await store();
-    await preferences.write({ theme: "light" });
-    expect(await preferences.read()).toEqual({ theme: "light" });
+    await preferences.write({
+      theme: "light",
+      inheritHostGitConfig: false,
+    });
+    expect(await preferences.read()).toEqual({
+      theme: "light",
+      inheritHostGitConfig: false,
+    });
     expect(
       JSON.parse(await readFile(join(base, "preferences.json"), "utf8")),
-    ).toEqual({ theme: "light" });
+    ).toEqual({ theme: "light", inheritHostGitConfig: false });
   });
 
   it("returns defaults when nothing has been stored", async () => {
     const { store: preferences } = await store();
     expect(await preferences.read()).toEqual(defaultPreferences);
+  });
+
+  it("adds the safe Git default to older preference files", async () => {
+    const { base, store: preferences } = await store();
+    await writeFile(
+      join(base, "preferences.json"),
+      JSON.stringify({ theme: "dark" }),
+    );
+    expect(await preferences.read()).toEqual({
+      theme: "dark",
+      inheritHostGitConfig: true,
+    });
   });
 
   it("falls back to defaults rather than failing on a corrupt file", async () => {

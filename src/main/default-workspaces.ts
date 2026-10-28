@@ -12,6 +12,7 @@ function atlasWorkspace(demoRoot: string): WorkspaceManifest {
       name: "Atlas Retail",
       description: "Example workspace with separate non-production and production targets.",
     },
+    git: { inheritHostConfig: "default" },
     agentProfiles: [
       {
         id: "default-agent",
@@ -129,6 +130,7 @@ function borealisWorkspace(demoRoot: string): WorkspaceManifest {
       name: "Borealis Health",
       description: "Example staging workspace.",
     },
+    git: { inheritHostConfig: "default" },
     agentProfiles: [
       {
         id: "default-agent",

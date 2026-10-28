@@ -38,6 +38,11 @@ import {
 } from "./local-resources.js";
 import type { ResolvedWorkspaceTarget } from "./workspace-registry.js";
 import { resolveConfiguredPath } from "./workspace-registry.js";
+import {
+  inspectHostGitConfiguration,
+  writeHostGitConfiguration,
+  type HostGitConfigurationInspector,
+} from "./git-config.js";
 
 const inheritedEnvironmentVariables = new Set([
   "PATH",
@@ -338,6 +343,11 @@ async function writeShellConfiguration(
   ]);
 }
 
+export interface WorkspaceRuntimeOptions {
+  readonly inheritHostGitConfig?: boolean;
+  readonly inspectHostGitConfiguration?: HostGitConfigurationInspector;
+}
+
 export async function createWorkspaceRuntime(
   baseDirectory: string,
   sessionId: string,
@@ -348,6 +358,7 @@ export async function createWorkspaceRuntime(
    * delivery, which never reads one.
    */
   readSecret?: (reference: CredentialReference) => Promise<string>,
+  options: WorkspaceRuntimeOptions = {},
 ): Promise<RuntimePaths> {
   const root = join(baseDirectory, "sessions", sessionId);
   const home = join(root, "home");
@@ -460,6 +471,22 @@ export async function createWorkspaceRuntime(
     ),
   ]);
 
+  let gitConfig: string | undefined;
+  if (options.inheritHostGitConfig) {
+    try {
+      const inspect =
+        options.inspectHostGitConfiguration ?? inspectHostGitConfiguration;
+      gitConfig = await writeHostGitConfiguration(
+        root,
+        await inspect(resolvedTarget.directories),
+      );
+    } catch {
+      // Git identity is a readiness warning rather than a launch condition.
+      // The host may have changed between readiness and launch, so preserve
+      // that policy here instead of turning the warning into a hidden block.
+    }
+  }
+
   return {
     root,
     home,
@@ -468,6 +495,7 @@ export async function createWorkspaceRuntime(
     sandboxConfig,
     targetState,
     agentState,
+    ...(gitConfig ? { gitConfig } : {}),
     ...(agentInstructions ? { agentInstructions } : {}),
     ...(brokerSocket ? { brokerSocket } : {}),
     ...(brokerHelper ? { brokerHelper } : {}),
@@ -564,6 +592,9 @@ export function buildWorkspaceEnvironment(
     TEMP: runtime.temp,
     CLAUDE_CODE_TMPDIR: runtime.temp,
     KUBECONFIG: runtime.kubeconfig,
+    ...(runtime.gitConfig
+      ? { GIT_CONFIG_GLOBAL: runtime.gitConfig }
+      : {}),
     OPSCAPSULE_WORKSPACE: resolvedTarget.workspace.manifest.metadata.id,
     OPSCAPSULE_TARGET: resolvedTarget.target.id,
     OPSCAPSULE_ENVIRONMENT: resolvedTarget.target.environment,

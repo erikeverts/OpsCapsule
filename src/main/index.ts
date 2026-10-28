@@ -81,6 +81,7 @@ import {
   resolveRendererAssetPath,
 } from "./renderer-protocol.js";
 import { initializeHostToolEnvironment } from "./host-tools.js";
+import { resolveHostGitConfigInheritance } from "../shared/git-config.js";
 
 app.setName("OpsCapsule");
 protocol.registerSchemesAsPrivileged([
@@ -267,6 +268,11 @@ function registerIpcHandlers(): void {
       targetId,
     );
     const store = credentialStoreFor();
+    const preferences = await preferencesStore.read();
+    const inheritHostGitConfig = resolveHostGitConfigInheritance(
+      resolvedTarget.workspace.manifest.git.inheritHostConfig,
+      preferences.inheritHostGitConfig,
+    );
     return checkTargetReadiness(
       resolvedTarget,
       undefined,
@@ -278,6 +284,9 @@ function registerIpcHandlers(): void {
             targetId,
           }),
         ),
+      {
+        inheritHostGitConfig,
+      },
     );
   });
 
@@ -385,6 +394,11 @@ function registerIpcHandlers(): void {
       workspaceId: resolvedTarget.workspace.manifest.metadata.id,
       targetId: resolvedTarget.target.id,
     };
+    const preferences = await preferencesStore.read();
+    const inheritHostGitConfig = resolveHostGitConfigInheritance(
+      resolvedTarget.workspace.manifest.git.inheritHostConfig,
+      preferences.inheritHostGitConfig,
+    );
     const runtime = await createWorkspaceRuntime(
       app.getPath("userData"),
       sessionId,
@@ -394,6 +408,7 @@ function registerIpcHandlers(): void {
           reference,
           scopeContext(reference.scope, credentialContext),
         ),
+      { inheritHostGitConfig },
     );
     let broker: CredentialBrokerSession | undefined;
     try {

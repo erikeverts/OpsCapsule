@@ -169,6 +169,8 @@ export interface RuntimePaths {
   targetState: string;
   agentState: string;
   agentInstructions?: string;
+  /** Generated allowlisted host Git configuration, when inheritance is on. */
+  gitConfig?: string;
   /**
    * Present only when this capsule brokers credentials. Paths only; no
    * credential value ever crosses the IPC boundary.

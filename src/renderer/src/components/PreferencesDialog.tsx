@@ -3,7 +3,8 @@ import type { ThemePreference } from "../../../shared/preferences";
 
 interface PreferencesDialogProps {
   state: PreferencesState;
-  onChange: (theme: ThemePreference) => void;
+  onThemeChange: (theme: ThemePreference) => void;
+  onGitConfigInheritanceChange: (enabled: boolean) => void;
   onClose: () => void;
 }
 
@@ -24,7 +25,8 @@ const themes: Array<{ value: ThemePreference; label: string; hint: string }> = [
  */
 export function PreferencesDialog({
   state,
-  onChange,
+  onThemeChange,
+  onGitConfigInheritanceChange,
   onClose,
 }: PreferencesDialogProps) {
   return (
@@ -41,7 +43,7 @@ export function PreferencesDialog({
         <header className="dialog-header">
           <div>
             <div className="eyebrow">Preferences</div>
-            <h2>Appearance</h2>
+            <h2>Application settings</h2>
           </div>
           <button className="text-button" onClick={onClose} type="button">
             Close
@@ -49,6 +51,7 @@ export function PreferencesDialog({
         </header>
 
         <div className="studio-card">
+          <h3>Appearance</h3>
           <p className="field-hint">
             Applies to OpsCapsule itself. Terminal colours come from the
             programs running inside a capsule.
@@ -58,7 +61,7 @@ export function PreferencesDialog({
               <input
                 checked={state.preferences.theme === theme.value}
                 name="theme"
-                onChange={() => onChange(theme.value)}
+                onChange={() => onThemeChange(theme.value)}
                 type="radio"
               />
               <span>
@@ -72,6 +75,26 @@ export function PreferencesDialog({
               </span>
             </label>
           ))}
+        </div>
+
+        <div className="studio-card">
+          <h3>Git</h3>
+          <label className="checkbox-field">
+            <input
+              checked={state.preferences.inheritHostGitConfig}
+              onChange={(event) =>
+                onGitConfigInheritanceChange(event.target.checked)
+              }
+              type="checkbox"
+            />
+            <span>
+              Inherit host Git identity by default
+              <span className="field-hint">
+                Generates a capsule-private configuration containing only the
+                effective user name and email. Workspaces can override this.
+              </span>
+            </span>
+          </label>
         </div>
       </section>
     </div>

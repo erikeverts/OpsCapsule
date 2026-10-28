@@ -70,3 +70,19 @@ other's value and produce an unreadable patch.
 
 User-defined themes are not implemented. The token layer is what makes them
 possible: a custom theme is a set of values for the same names.
+
+## Git
+
+**Inherit host Git identity by default** is enabled for new and existing
+installations. It does not copy or mount `~/.gitconfig`. The main process asks
+host Git for the effective `user.name` and `user.email`, including identities
+selected by `includeIf` rules for configured repositories, and writes only
+those values into a private per-session configuration.
+
+Each workspace may follow this application preference, force inheritance on,
+or turn it off. The workspace choice is manifest-safe; the resolved name and
+email remain host-local and are never written to `workspace.yaml`.
+
+Credential helpers, hooks, SSH commands, signing configuration, arbitrary
+includes, and other Git settings are not imported. SSH authentication and
+commit signing require separate brokered capabilities.

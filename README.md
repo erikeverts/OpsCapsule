@@ -21,6 +21,8 @@ The current iteration provides:
   an explicit environment path by the selected adapter;
 - structured warnings for imported identity overrides, credentials, hooks,
   plugins, and MCP declarations;
+- safe, per-session inheritance of effective Git name and email without
+  mounting the user's Git configuration;
 - a visible, non-mutating readiness report for agent, filesystem, and sandbox
   prerequisites before launch;
 - persistent agent data, cache, and session state isolated by workspace, target,
@@ -120,4 +122,6 @@ identities are described in
 setup and testing steps in [credentials](docs/credentials.md). Non-secret
 facts a workspace carries, and how they reach the agent, are described in
 [workspace context](docs/workspace-context.md). Application settings, and how
-themes are defined, are described in [preferences](docs/preferences.md).
+themes are defined, are described in [preferences](docs/preferences.md). Safe
+host Git identity inheritance is recorded in
+[ADR 0009](docs/adr/0009-safe-host-git-configuration.md).
