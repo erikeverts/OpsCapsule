@@ -8,6 +8,7 @@ import {
   secretLikeMetadataKeys,
   workspaceContextSchema,
 } from "./metadata.js";
+import { workspaceGitSettingsSchema } from "./git-config.js";
 
 const identifier = z
   .string()
@@ -85,6 +86,10 @@ const reservedAgentEnvironmentVariables = new Set([
   "AWS_SESSION_TOKEN",
   "AWS_REGION",
   "AWS_DEFAULT_REGION",
+  "GIT_CONFIG_GLOBAL",
+  "GIT_CONFIG_SYSTEM",
+  "GIT_CONFIG_NOSYSTEM",
+  "GIT_CONFIG_COUNT",
 ]);
 
 export const agentConfigurationFileSchema = z.object({
@@ -262,6 +267,9 @@ export const workspaceManifestSchema = z.object({
     id: identifier,
     name: z.string().min(1),
     description: z.string().min(1).optional(),
+  }),
+  git: workspaceGitSettingsSchema.default({
+    inheritHostConfig: "default",
   }),
   agentInstructions: z.string().max(50_000).optional(),
   agentProfiles: z.array(agentProfileSchema).default([]),

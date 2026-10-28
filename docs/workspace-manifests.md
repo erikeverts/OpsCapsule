@@ -12,6 +12,21 @@ database representation. OpsCapsule validates the full manifest before saving,
 writes replacements atomically, and rejects a save if another process changed the
 file after it was opened.
 
+## Git identity inheritance
+
+A workspace can override the user's application-level Git identity preference:
+
+```yaml
+git:
+  inheritHostConfig: default # default, enabled, or disabled
+```
+
+`default` follows Preferences, which enables inheritance initially. This is a
+safe projection, not a file mount: only the effective host `user.name` and
+`user.email` are generated into the capsule session. The manifest contains no
+identity values, and OpsCapsule does not import credential helpers, hooks,
+commands, signing keys, or include paths.
+
 Deleting a workspace removes its managed manifest directory, imported resource
 copies, and target-specific OpsCapsule state. Referenced project directories and
 repositories are never deleted. A workspace cannot be deleted while one of its
