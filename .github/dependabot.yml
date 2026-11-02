@@ -26,6 +26,16 @@ updates:
         update-types:
           - "version-update:semver-major"
     groups:
+      # Forge packages share one release train. Partial major upgrades can mix
+      # incompatible core/plugin/maker versions and miss coordinated changes
+      # such as artifact output paths, so always review them together.
+      electron-forge:
+        patterns:
+          - "@electron-forge/*"
+        update-types:
+          - major
+          - minor
+          - patch
       dev-dependencies:
         dependency-type: development
         update-types:
