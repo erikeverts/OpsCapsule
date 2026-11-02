@@ -80,12 +80,12 @@
     "@vitejs/plugin-react": "6.1.2",
     "concurrently": "10.0.6",
     "cross-env": "10.1.0",
-    "electron": "44.7.0",
+    "electron": "44.9.3",
     "esbuild": "0.28.2",
     "sharp": "0.35.5",
     "typescript": "7.0.2",
-    "vite": "8.3.4",
-    "vitest": "5.0.4",
+    "vite": "8.3.5",
+    "vitest": "5.0.5",
     "wait-on": "9.5.1"
   }
 }
