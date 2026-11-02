@@ -191,12 +191,9 @@ reachability assessment and a review deadline. Unknown advisories and expired
 or obsolete acceptances fail closed; the severity threshold is never lowered to
 make one dependency pass.
 
-The Sandbox Runtime currently reaches `node-forge` only through its certificate
-generation path, while the outstanding advisory affects signature verification.
-That advisory is accepted temporarily with its reasoning and deadline in the
-policy file. Sandbox Runtime's Zod dependency is forced to reuse OpsCapsule's
-patched Zod 4 version; the runtime imports the documented `zod/v3` compatibility
-surface, so a vulnerable private Zod 3 copy is not shipped.
+Sandbox Runtime's Zod dependency is forced to reuse OpsCapsule's patched Zod 4
+version; the runtime imports the documented `zod/v3` compatibility surface, so
+a vulnerable private Zod 3 copy is not shipped.
 
 Electron Forge still reports development-only advisories through packaging and
 legacy DMG dependencies. Those packages are not included in the application,
