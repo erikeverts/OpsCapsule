@@ -88,6 +88,7 @@ function blankWorkspace(): WorkspaceManifest {
       id: "new-workspace",
       name: "New workspace",
     },
+    git: { inheritHostConfig: "default" },
     agentProfiles: [
       {
         id: "agent",
@@ -1160,6 +1161,27 @@ export function WorkspaceEditor({
                       })
                     }
                   />
+                </Field>
+                <Field
+                  label="Host Git configuration"
+                  hint="Only the effective Git user name and email are generated into each capsule; the host config file is never copied."
+                  wide
+                >
+                  <select
+                    value={draft.git.inheritHostConfig}
+                    onChange={(event) =>
+                      updateDraft((next) => {
+                        next.git.inheritHostConfig = event.target.value as
+                          | "default"
+                          | "enabled"
+                          | "disabled";
+                      })
+                    }
+                  >
+                    <option value="default">Use application preference</option>
+                    <option value="enabled">Always inherit safe Git identity</option>
+                    <option value="disabled">Do not inherit host Git identity</option>
+                  </select>
                 </Field>
                 {document ? (
                   <Field label="Manifest" wide>

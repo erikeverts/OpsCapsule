@@ -1,4 +1,11 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import {
+  mkdir,
+  mkdtemp,
+  readFile,
+  readlink,
+  rm,
+  writeFile,
+} from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -22,6 +29,50 @@ afterEach(async () => {
 });
 
 describe("workspace runtime isolation", () => {
+  it("materializes an allowlisted host Git identity for the session", async () => {
+    const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-git-runtime-"));
+    temporaryDirectories.push(baseDirectory);
+    const registry = new WorkspaceRegistry(baseDirectory);
+    await registry.initialize();
+    const target = await registry.resolveTarget("atlas", "development");
+    const runtime = await createWorkspaceRuntime(
+      baseDirectory,
+      "git-session",
+      target,
+      undefined,
+      {
+        inheritHostGitConfig: true,
+        inspectHostGitConfiguration: async () => ({
+          executable: "/usr/bin/git",
+          global: { name: "Capsule Operator", email: "operator@example.test" },
+          repositories: [],
+        }),
+      },
+    );
+
+    expect(runtime.gitConfig).toBe(join(runtime.root, "gitconfig"));
+    expect(await readFile(runtime.gitConfig!, "utf8")).toContain(
+      'email = "operator@example.test"',
+    );
+    const environment = buildWorkspaceEnvironment(runtime, target);
+    expect(environment.GIT_CONFIG_GLOBAL).toBe(runtime.gitConfig);
+    expect(environment.GIT_CONFIG_NOSYSTEM).toBe("1");
+    if (process.platform !== "win32") {
+      expect(runtime.toolShimDirectory).toBe(join(runtime.root, "bin"));
+      expect(await readlink(join(runtime.toolShimDirectory!, "git"))).toBe(
+        "/usr/bin/git",
+      );
+      expect(environment.PATH?.split(":")[0]).toBe(
+        runtime.toolShimDirectory,
+      );
+    }
+
+    await cleanupWorkspaceRuntime(runtime);
+    await expect(readFile(runtime.gitConfig!, "utf8")).rejects.toMatchObject({
+      code: "ENOENT",
+    });
+  });
+
   it("imports managed agent configuration and keeps state target-specific", async () => {
     const baseDirectory = await mkdtemp(join(tmpdir(), "opscapsule-agent-"));
     temporaryDirectories.push(baseDirectory);

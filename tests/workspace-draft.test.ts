@@ -13,6 +13,7 @@ function workspace(): WorkspaceManifest {
     apiVersion: "opscapsule.dev/v1alpha1",
     kind: "Workspace",
     metadata: { id: "example", name: "Example" },
+    git: { inheritHostConfig: "default" },
     agentProfiles: [
       {
         id: "agent",

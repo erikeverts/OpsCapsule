@@ -9,7 +9,10 @@ import type {
 import type { CredentialStatus } from "../../shared/credentials";
 import { pinnedMetadata } from "../../shared/metadata";
 import type { PreferencesState } from "../../shared/contracts";
-import type { ThemePreference } from "../../shared/preferences";
+import type {
+  Preferences,
+  ThemePreference,
+} from "../../shared/preferences";
 import { TerminalPane } from "./components/TerminalPane";
 import { CredentialSidebar } from "./components/CredentialSidebar";
 import { BrandMark } from "./components/BrandMark";
@@ -261,10 +264,19 @@ export function App() {
   }, []);
 
   async function changeTheme(theme: ThemePreference): Promise<void> {
+    await changePreferences({ theme });
+  }
+
+  async function changePreferences(
+    update: Partial<Preferences>,
+  ): Promise<void> {
     setPreferences(
       await window.opsCapsule.savePreferences({
-        ...(preferences?.preferences ?? { theme }),
-        theme,
+        ...(preferences?.preferences ?? {
+          theme: "system",
+          inheritHostGitConfig: true,
+        }),
+        ...update,
       }),
     );
   }
@@ -427,7 +439,10 @@ export function App() {
       <div className="window-drag-region" aria-hidden="true" />
       {preferencesOpen && preferences ? (
         <PreferencesDialog
-          onChange={(theme) => void changeTheme(theme)}
+          onGitConfigInheritanceChange={(enabled) =>
+            void changePreferences({ inheritHostGitConfig: enabled })
+          }
+          onThemeChange={(theme) => void changeTheme(theme)}
           onClose={() => setPreferencesOpen(false)}
           state={preferences}
         />

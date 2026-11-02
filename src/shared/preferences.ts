@@ -19,6 +19,11 @@ export const preferencesSchema = z
      * appearance is the one that looks broken at night.
      */
     theme: themePreferenceSchema.default("system"),
+    /**
+     * Capsules receive only a generated allowlist of safe Git values. The
+     * host config file itself is never mounted or copied.
+     */
+    inheritHostGitConfig: z.boolean().default(true),
   })
   .strict();
 

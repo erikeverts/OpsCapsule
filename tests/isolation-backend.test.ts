@@ -19,6 +19,11 @@ import {
   wrapSandboxedLaunch,
 } from "../src/main/isolation/sandbox-command.js";
 import { allowsPublicDestination } from "../src/main/isolation/public-network.js";
+import {
+  resolveHostGitExecutable,
+  writeGitExecutableShim,
+  writeHostGitConfiguration,
+} from "../src/main/git-config.js";
 
 const executeFile = promisify(execFile);
 const temporaryDirectories: string[] = [];
@@ -130,6 +135,98 @@ describe("sandbox policy", () => {
 describe.skipIf(!macOsSandboxAvailable)(
   "sandbox runtime isolation",
   () => {
+    it(
+      "runs direct Apple Git without host temp writes or system configuration",
+      async () => {
+        const base = await mkdtemp(join("/private/tmp", "oc-sandbox-git-"));
+        temporaryDirectories.push(base);
+        const root = join(base, "runtime");
+        const home = join(root, "home");
+        const sessionTemp = join(base, "temp");
+        const repository = join(base, "repository");
+        const targetState = join(base, "target-state");
+        await Promise.all(
+          [root, home, sessionTemp, repository, targetState].map((path) =>
+            mkdir(path, { recursive: true }),
+          ),
+        );
+        const gitExecutable = await resolveHostGitExecutable();
+        const toolShimDirectory = await writeGitExecutableShim(
+          root,
+          gitExecutable,
+        );
+        const gitConfig = await writeHostGitConfiguration(root, {
+          executable: gitExecutable,
+          global: {
+            name: "Capsule Operator",
+            email: "operator@example.test",
+          },
+          repositories: [],
+        });
+        await executeFile(gitExecutable, ["init", "--quiet", repository], {
+          env: {
+            ...process.env,
+            HOME: home,
+            GIT_CONFIG_NOSYSTEM: "1",
+            GIT_CONFIG_GLOBAL: gitConfig,
+          },
+        });
+        const runtime = {
+          root,
+          home,
+          temp: sessionTemp,
+          kubeconfig: join(root, "kubeconfig.yaml"),
+          sandboxConfig: join(root, "sandbox.json"),
+          targetState,
+          agentState: join(targetState, "agents", "example"),
+          gitConfig,
+          gitExecutable,
+          toolShimDirectory,
+        };
+        const isolation = await new SandboxRuntimeIsolationBackend({
+          runtime,
+          readOnlyPaths: [],
+          runtimeReadOnlyPaths: await resolvePathChain(gitExecutable),
+          readWritePaths: [repository, targetState],
+          network: { mode: "deny", allowedDomains: [] },
+        }).prepare();
+        if (isolation.execution.backend !== "sandbox-runtime") {
+          throw new Error("Expected Sandbox Runtime execution");
+        }
+        await initializeSandboxRuntime(isolation.execution);
+        const launch = await wrapSandboxedLaunch(
+          {
+            command: "/bin/sh",
+            args: ["-c", "git config --list --show-origin"],
+            cwd: repository,
+            env: {
+              ...process.env,
+              HOME: home,
+              TMPDIR: sessionTemp,
+              TMP: sessionTemp,
+              TEMP: sessionTemp,
+              PATH: `${toolShimDirectory}:/usr/bin:/bin`,
+              GIT_CONFIG_NOSYSTEM: "1",
+              GIT_CONFIG_GLOBAL: gitConfig,
+            } as Record<string, string>,
+          },
+          "direct-git",
+        );
+        const result = await executeFile(launch.command, launch.args, {
+          cwd: launch.cwd,
+          env: launch.env,
+        });
+        cleanupSandboxCommand();
+        await resetSandboxRuntime();
+
+        expect(result.stderr).not.toMatch(/xcrun_db|FSEvents|Operation not permitted/);
+        expect(result.stdout).not.toContain("credential.helper");
+        expect(result.stdout).toContain("user.name=Capsule Operator");
+        expect(result.stdout).toContain("user.email=operator@example.test");
+      },
+      20_000,
+    );
+
     it(
       "allows configured roots and denies sibling user data to child processes",
       async () => {

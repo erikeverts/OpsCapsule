@@ -12,6 +12,12 @@ import type { CredentialReference } from "../shared/credentials.js";
 import { checkCredentialReadiness } from "./credentials/readiness.js";
 import { RuntimeAdapterRegistry } from "./runtime-adapters/registry.js";
 import {
+  completeGitIdentity,
+  describeGitIdentity,
+  inspectHostGitConfiguration,
+  type HostGitConfigurationInspector,
+} from "./git-config.js";
+import {
   resolveConfiguredPath,
   type ResolvedWorkspaceTarget,
 } from "./workspace-registry.js";
@@ -127,6 +133,69 @@ async function configurationCheck(
   }
 }
 
+async function gitConfigurationCheck(
+  resolvedTarget: ResolvedWorkspaceTarget,
+  inheritHostGitConfig: boolean,
+  inspect: HostGitConfigurationInspector,
+): Promise<TargetReadinessCheck> {
+  if (!inheritHostGitConfig) {
+    return {
+      id: "git-identity",
+      label: "Git identity",
+      status: "pass",
+      detail: "Host Git identity inheritance is disabled for this workspace.",
+    };
+  }
+
+  try {
+    const configuration = await inspect(resolvedTarget.directories);
+    const repositoryDetails = configuration.repositories.map(
+      ({ repositoryRoot, identity }) =>
+        `${repositoryRoot}: ${describeGitIdentity(identity)}`,
+    );
+    const globalComplete = completeGitIdentity(configuration.global);
+    const repositoriesComplete =
+      configuration.repositories.length > 0 &&
+      configuration.repositories.every(({ identity }) =>
+        completeGitIdentity(identity),
+      );
+    const complete = configuration.repositories.length > 0
+      ? repositoriesComplete
+      : globalComplete;
+    const details = [
+      ...(configuration.global.name || configuration.global.email
+        ? [`Global default: ${describeGitIdentity(configuration.global)}`]
+        : []),
+      ...repositoryDetails,
+    ];
+
+    return {
+      id: "git-identity",
+      label: "Git identity",
+      status: complete ? "pass" : "warning",
+      detail: complete
+        ? configuration.repositories.length > 0
+          ? `${configuration.repositories.length} Git repositor${configuration.repositories.length === 1 ? "y" : "ies"} will receive an effective host identity.`
+          : `Host Git identity ${describeGitIdentity(configuration.global)} will be inherited.`
+        : "Host Git configuration does not define both user.name and user.email for the detected repositories or global default.",
+      ...(details.length > 0 ? { details } : {}),
+    };
+  } catch (error) {
+    return {
+      id: "git-identity",
+      label: "Git identity",
+      status: "warning",
+      detail: detail(error),
+    };
+  }
+}
+
+export interface TargetReadinessOptions {
+  /** Undefined keeps legacy/library callers from consulting host Git. */
+  readonly inheritHostGitConfig?: boolean;
+  readonly inspectHostGitConfiguration?: HostGitConfigurationInspector;
+}
+
 export async function checkTargetReadiness(
   resolvedTarget: ResolvedWorkspaceTarget,
   adapters = new RuntimeAdapterRegistry(),
@@ -136,6 +205,7 @@ export async function checkTargetReadiness(
    * business knowing about.
    */
   hasStoredSecret?: (reference: CredentialReference) => Promise<boolean>,
+  options: TargetReadinessOptions = {},
 ): Promise<TargetReadinessReport> {
   const checks: TargetReadinessCheck[] = [];
   try {
@@ -192,6 +262,15 @@ export async function checkTargetReadiness(
       : "No portable workspace instructions are configured.",
   });
   checks.push(await directoryCheck(resolvedTarget));
+  if (options.inheritHostGitConfig !== undefined) {
+    checks.push(
+      await gitConfigurationCheck(
+        resolvedTarget,
+        options.inheritHostGitConfig,
+        options.inspectHostGitConfiguration ?? inspectHostGitConfiguration,
+      ),
+    );
+  }
 
   if (resolvedTarget.target.isolation.mode === "context-only") {
     checks.push({

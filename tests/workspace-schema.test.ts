@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseWorkspaceManifest } from "../src/shared/workspace-schema.js";
+import { resolveHostGitConfigInheritance } from "../src/shared/git-config.js";
 
 function manifest(): Record<string, unknown> {
   return {
@@ -35,6 +36,28 @@ function manifest(): Record<string, unknown> {
 }
 
 describe("workspace agent profile schema", () => {
+  it("resolves workspace Git inheritance against the application default", () => {
+    expect(resolveHostGitConfigInheritance("default", true)).toBe(true);
+    expect(resolveHostGitConfigInheritance("default", false)).toBe(false);
+    expect(resolveHostGitConfigInheritance("enabled", false)).toBe(true);
+    expect(resolveHostGitConfigInheritance("disabled", true)).toBe(false);
+  });
+
+  it("follows the application Git setting by default", () => {
+    expect(parseWorkspaceManifest(manifest()).git).toEqual({
+      inheritHostConfig: "default",
+    });
+  });
+
+  it("accepts an explicit workspace Git inheritance override", () => {
+    const input = manifest();
+    input.git = { inheritHostConfig: "disabled" };
+
+    expect(parseWorkspaceManifest(input).git.inheritHostConfig).toBe(
+      "disabled",
+    );
+  });
+
   it("keeps legacy target runtimes valid", () => {
     const parsed = parseWorkspaceManifest(manifest());
 
@@ -116,6 +139,24 @@ describe("workspace agent profile schema", () => {
         adapter: "command",
         runtime: { command: "custom-agent", args: [] },
         environment: { AWS_PROFILE: "another-account" },
+      },
+    ];
+    input.defaultAgentProfile = "custom";
+
+    expect(() => parseWorkspaceManifest(input)).toThrow(
+      "managed by OpsCapsule",
+    );
+  });
+
+  it("does not let profiles replace the generated Git configuration", () => {
+    const input = manifest();
+    input.agentProfiles = [
+      {
+        id: "custom",
+        name: "Custom",
+        adapter: "command",
+        runtime: { command: "custom-agent", args: [] },
+        environment: { GIT_CONFIG_GLOBAL: "/tmp/unreviewed-gitconfig" },
       },
     ];
     input.defaultAgentProfile = "custom";

@@ -16,6 +16,72 @@ afterEach(async () => {
 });
 
 describe("target readiness", () => {
+  it("shows the effective inherited Git identity", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opscapsule-readiness-"));
+    temporaryDirectories.push(root);
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+    const target = await registry.resolveTarget("atlas", "development");
+
+    const report = await checkTargetReadiness(
+      target,
+      undefined,
+      undefined,
+      {
+        inheritHostGitConfig: true,
+        inspectHostGitConfiguration: async () => ({
+          executable: "/usr/bin/git",
+          global: { name: "Default User", email: "default@example.test" },
+          repositories: [
+            {
+              configuredDirectory: target.defaultDirectory.path,
+              repositoryRoot: target.defaultDirectory.path,
+              gitDirectory: join(target.defaultDirectory.path, ".git"),
+              identity: { name: "Work User", email: "work@example.test" },
+            },
+          ],
+        }),
+      },
+    );
+
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({
+        id: "git-identity",
+        status: "pass",
+        details: expect.arrayContaining([
+          `${target.defaultDirectory.path}: Work User <work@example.test>`,
+        ]),
+      }),
+    );
+  });
+
+  it("does not inspect host Git when a workspace disables inheritance", async () => {
+    const root = await mkdtemp(join(tmpdir(), "opscapsule-readiness-"));
+    temporaryDirectories.push(root);
+    const registry = new WorkspaceRegistry(root);
+    await registry.initialize();
+
+    const report = await checkTargetReadiness(
+      await registry.resolveTarget("atlas", "development"),
+      undefined,
+      undefined,
+      {
+        inheritHostGitConfig: false,
+        inspectHostGitConfiguration: async () => {
+          throw new Error("must not be called");
+        },
+      },
+    );
+
+    expect(report.checks).toContainEqual(
+      expect.objectContaining({
+        id: "git-identity",
+        status: "pass",
+        detail: expect.stringContaining("disabled"),
+      }),
+    );
+  });
+
   it("reports non-mutating checks before launch", async () => {
     const root = await mkdtemp(join(tmpdir(), "opscapsule-readiness-"));
     temporaryDirectories.push(root);

@@ -6,6 +6,9 @@ metadata:
   name: Example workspace
   description: Example with separate non-production and production targets.
 
+git:
+  inheritHostConfig: default
+
 agentInstructions: |
   # Operating guidance
   Verify the target identity and Kubernetes context before making changes.

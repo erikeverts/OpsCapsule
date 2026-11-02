@@ -61,11 +61,14 @@ export async function prepareIsolation(
   // directory. Resolving the chain keeps that grant as narrow as the command
   // selected by the profile.
   const agentExecutablePaths = await resolvePathChain(agentExecutable.source);
+  const gitExecutablePaths = runtime.gitExecutable
+    ? await resolvePathChain(runtime.gitExecutable)
+    : [];
 
   return new SandboxRuntimeIsolationBackend({
     runtime,
     readOnlyPaths,
-    runtimeReadOnlyPaths: agentExecutablePaths,
+    runtimeReadOnlyPaths: [...agentExecutablePaths, ...gitExecutablePaths],
     readWritePaths: [...readWritePaths, runtime.targetState],
     network: resolvedTarget.target.isolation.network,
     brokerSocket: runtime.brokerSocket,
