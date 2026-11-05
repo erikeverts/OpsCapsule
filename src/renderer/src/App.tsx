@@ -89,6 +89,14 @@ function ContextStrip({ target }: { target: WorkspaceTargetSummary }) {
           {target.agent.name} · {target.agent.adapter}
         </strong>
       </div>
+      <div>
+        <span>Containers</span>
+        <strong>
+          {target.containerRuntime
+            ? `Isolated · ${target.containerRuntime.provider}`
+            : "Disabled"}
+        </strong>
+      </div>
       <div
         aria-describedby="filesystem-root-details"
         className="context-filesystem"
@@ -171,6 +179,9 @@ export function App() {
   const [selectedTargetId, setSelectedTargetId] = useState("");
   const [sessions, setSessions] = useState<Record<string, WorkspaceSession>>({});
   const [startingKey, setStartingKey] = useState<string | null>(null);
+  const [resettingRuntimeKey, setResettingRuntimeKey] = useState<string | null>(
+    null,
+  );
   const [error, setError] = useState<string | null>(null);
   const [editor, setEditor] = useState<EditorRoute | null>(null);
   const [credentials, setCredentials] = useState<{
@@ -416,6 +427,29 @@ export function App() {
       delete next[key];
       return next;
     });
+  }
+
+  async function resetContainerRuntime(
+    workspaceId: string,
+    targetId: string,
+  ): Promise<void> {
+    const key = sessionKey(workspaceId, targetId);
+    if (
+      !window.confirm(
+        "Reset this target's Docker environment? All containers, images, volumes, and registry logins stored in it will be deleted.",
+      )
+    ) {
+      return;
+    }
+    setResettingRuntimeKey(key);
+    setError(null);
+    try {
+      await window.opsCapsule.resetContainerRuntime(workspaceId, targetId);
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : String(reason));
+    } finally {
+      setResettingRuntimeKey(null);
+    }
   }
 
   const production = selectedTarget?.risk === "production";
@@ -685,6 +719,30 @@ export function App() {
                     </div>
                   ))}
                 </div>
+                {selectedTarget.containerRuntime ? (
+                  <div className="container-runtime-actions">
+                    <span>
+                      Docker runs in a target-owned VM and starts with the
+                      capsule. Stopping the capsule stops the VM; its data is
+                      retained.
+                    </span>
+                    <button
+                      className="danger-button"
+                      disabled={resettingRuntimeKey !== null}
+                      onClick={() =>
+                        void resetContainerRuntime(
+                          selectedWorkspace.id,
+                          selectedTarget.id,
+                        )
+                      }
+                      type="button"
+                    >
+                      {resettingRuntimeKey === activeKey
+                        ? "Resetting Docker…"
+                        : "Reset Docker environment"}
+                    </button>
+                  </div>
+                ) : null}
                 <button
                   className="primary-button"
                   disabled={

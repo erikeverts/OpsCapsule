@@ -91,6 +91,14 @@ targets:
       - application
       - documentation
     defaultDirectory: application
+    containerRuntime:
+      mode: isolated
+      provider: colima
+      persistence: target
+      resources:
+        cpus: 4
+        memoryGiB: 8
+        diskGiB: 60
     isolation:
       mode: enforced
       network:
