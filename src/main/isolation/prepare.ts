@@ -64,13 +64,23 @@ export async function prepareIsolation(
   const gitExecutablePaths = runtime.gitExecutable
     ? await resolvePathChain(runtime.gitExecutable)
     : [];
+  const containerSocketPaths = runtime.containerRuntime
+    ? await resolvePathChain(runtime.containerRuntime.socket)
+    : [];
 
   return new SandboxRuntimeIsolationBackend({
     runtime,
     readOnlyPaths,
-    runtimeReadOnlyPaths: [...agentExecutablePaths, ...gitExecutablePaths],
+    runtimeReadOnlyPaths: [
+      ...agentExecutablePaths,
+      ...gitExecutablePaths,
+      ...containerSocketPaths,
+    ],
     readWritePaths: [...readWritePaths, runtime.targetState],
     network: resolvedTarget.target.isolation.network,
-    brokerSocket: runtime.brokerSocket,
+    allowedUnixSockets: [
+      runtime.brokerSocket,
+      runtime.containerRuntime?.socket,
+    ].filter((path): path is string => Boolean(path)),
   }).prepare();
 }

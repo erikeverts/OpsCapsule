@@ -51,6 +51,17 @@ export interface KubernetesContextSummary {
   namespace?: string;
 }
 
+export interface ContainerRuntimeSummary {
+  mode: "isolated";
+  provider: "colima";
+  persistence: "target";
+  resources: {
+    cpus: number;
+    memoryGiB: number;
+    diskGiB: number;
+  };
+}
+
 export interface WorkspaceTargetSummary {
   /** Workspace entries with this target's overrides applied. Non-secret. */
   metadata: MetadataEntry[];
@@ -63,6 +74,7 @@ export interface WorkspaceTargetSummary {
   directories: DirectorySummary[];
   defaultDirectory: string;
   agent: AgentProfileSummary;
+  containerRuntime?: ContainerRuntimeSummary;
   isolationMode: IsolationMode;
   networkMode: NetworkMode;
 }
@@ -183,6 +195,16 @@ export interface RuntimePaths {
   brokerHelper?: string;
   /** Directory holding the workspace context the agent may read. */
   context?: string;
+  /** Target-owned container engine paths. The engine state itself is never a
+   * sandbox filesystem grant; only its exact socket is reachable. */
+  containerRuntime?: {
+    provider: "colima";
+    profile: string;
+    stateDirectory: string;
+    colimaHome: string;
+    socket: string;
+    dockerConfig: string;
+  };
 }
 
 export type ReadinessCheckStatus = "pass" | "warning" | "fail";
@@ -296,6 +318,11 @@ export const terminalResizeInput = z.object({
 
 export const stopWorkspaceInput = z.object({
   sessionId: z.string().min(1),
+});
+
+export const resetContainerRuntimeInput = z.object({
+  workspaceId: z.string().min(1),
+  targetId: z.string().min(1),
 });
 
 export const credentialStatusInput = z.object({
@@ -427,6 +454,8 @@ export interface OpsCapsuleApi {
     rows: number,
   ): Promise<void>;
   stopWorkspace(sessionId: string): Promise<void>;
+  /** Deletes the target VM, its images, containers, and volumes. */
+  resetContainerRuntime(workspaceId: string, targetId: string): Promise<void>;
   onTerminalData(listener: (event: TerminalDataEvent) => void): () => void;
   onTerminalExit(listener: (event: TerminalExitEvent) => void): () => void;
 }

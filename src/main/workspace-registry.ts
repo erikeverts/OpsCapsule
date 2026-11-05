@@ -798,6 +798,7 @@ export class WorkspaceRegistry {
         command: agent.profile.runtime.command,
         legacy: agent.legacy,
       },
+      containerRuntime: target.containerRuntime,
       isolationMode: target.isolation.mode,
       networkMode: target.isolation.network.mode,
     };

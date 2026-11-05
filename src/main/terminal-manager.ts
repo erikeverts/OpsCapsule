@@ -65,6 +65,7 @@ interface TerminalRecord {
 
 interface SessionRecord {
   workspaceId: string;
+  targetId: string;
   terminalIds: Set<string>;
   runtime: RuntimePaths;
   worker: UtilityProcess;
@@ -102,6 +103,7 @@ interface TerminalManagerOptions {
   workerPath: string;
   forkWorker: (workerPath: string, options: WorkerOptions) => UtilityProcess;
   runtimeAdapters?: RuntimeAdapterRegistry;
+  onSessionStopped?: (runtime: RuntimePaths) => Promise<void>;
 }
 
 export class TerminalManager {
@@ -111,12 +113,14 @@ export class TerminalManager {
   private readonly workerPath: string;
   private readonly forkWorker: TerminalManagerOptions["forkWorker"];
   private readonly runtimeAdapters: RuntimeAdapterRegistry;
+  private readonly onSessionStopped?: (runtime: RuntimePaths) => Promise<void>;
 
   constructor(options: TerminalManagerOptions) {
     this.events = options.events;
     this.workerPath = options.workerPath;
     this.forkWorker = options.forkWorker;
     this.runtimeAdapters = options.runtimeAdapters ?? new RuntimeAdapterRegistry();
+    this.onSessionStopped = options.onSessionStopped;
   }
 
   createSessionId(): string {
@@ -126,6 +130,13 @@ export class TerminalManager {
   hasActiveWorkspace(workspaceId: string): boolean {
     return [...this.sessions.values()].some(
       (session) => session.workspaceId === workspaceId,
+    );
+  }
+
+  hasActiveTarget(workspaceId: string, targetId: string): boolean {
+    return [...this.sessions.values()].some(
+      (session) =>
+        session.workspaceId === workspaceId && session.targetId === targetId,
     );
   }
 
@@ -167,6 +178,7 @@ export class TerminalManager {
     });
     const session: SessionRecord = {
       workspaceId: resolvedTarget.workspace.manifest.metadata.id,
+      targetId: resolvedTarget.target.id,
       terminalIds: new Set(),
       runtime,
       worker,
@@ -285,7 +297,11 @@ export class TerminalManager {
       pending.reject(new Error("Terminal worker stopped before launch completed"));
     });
     this.sessions.delete(sessionId);
-    await cleanupWorkspaceRuntime(session.runtime);
+    try {
+      await this.onSessionStopped?.(session.runtime);
+    } finally {
+      await cleanupWorkspaceRuntime(session.runtime);
+    }
   }
 
   async stopAll(): Promise<void> {

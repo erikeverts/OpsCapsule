@@ -23,6 +23,7 @@ export const IPC = {
   themeChanged: "preferences:theme-changed",
   startWorkspace: "workspace:start",
   stopWorkspace: "workspace:stop",
+  resetContainerRuntime: "container-runtime:reset",
   terminalAttach: "terminal:attach",
   terminalWrite: "terminal:write",
   terminalResize: "terminal:resize",

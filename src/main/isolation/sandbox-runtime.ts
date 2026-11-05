@@ -40,6 +40,7 @@ export function buildSandboxRuntimeSettings(options: {
   readWritePaths: string[];
   network: IsolationPreparationContext["network"];
   userHome: string;
+  allowedUnixSockets?: string[];
   brokerSocket?: string;
 }): SandboxRuntimeSettings {
   // Sandbox Runtime deliberately rejects "*" in an allowlist. Public mode
@@ -55,11 +56,16 @@ export function buildSandboxRuntimeSettings(options: {
       allowedDomains,
       deniedDomains: options.network.mode === "deny" ? ["*"] : [],
       strictAllowlist: options.network.mode !== "public",
-      // The capsule's only route back to the application. Exactly one
-      // absolute path per session; glob patterns are not honoured by the
-      // sandbox, which usefully forces the narrowest possible allowance.
+      // Exact paths only; glob patterns are not honoured. These are a
+      // session credential broker and, when configured, a target-owned
+      // container engine. A shared host Docker socket is never admitted.
       // allowAllUnixSockets and allowLocalBinding stay false unconditionally.
-      allowUnixSockets: options.brokerSocket ? [options.brokerSocket] : [],
+      allowUnixSockets: [
+        ...new Set([
+          ...(options.allowedUnixSockets ?? []),
+          ...(options.brokerSocket ? [options.brokerSocket] : []),
+        ]),
+      ],
       allowAllUnixSockets: false,
       allowLocalBinding: false,
     },
@@ -232,6 +238,7 @@ export class SandboxRuntimeIsolationBackend implements IsolationBackend {
       readWritePaths,
       network: this.context.network,
       userHome: homedir(),
+      allowedUnixSockets: this.context.allowedUnixSockets,
       brokerSocket: this.context.brokerSocket,
     });
 

@@ -79,6 +79,7 @@ describe("terminal utility-process orchestration", () => {
     const runtime = await createWorkspaceRuntime(base, "worker-session", target);
     const workers: FakeUtilityProcess[] = [];
     const dataEvents: Array<{ terminalId: string; data: string }> = [];
+    const stoppedRuntimes: string[] = [];
     const manager = new TerminalManager({
       events: {
         data: ({ terminalId, data }) => dataEvents.push({ terminalId, data }),
@@ -90,6 +91,9 @@ describe("terminal utility-process orchestration", () => {
         workers.push(worker);
         queueMicrotask(() => worker.emit("spawn"));
         return worker as unknown as UtilityProcess;
+      },
+      onSessionStopped: async (stopped) => {
+        stoppedRuntimes.push(stopped.root);
       },
     });
 
@@ -142,5 +146,6 @@ describe("terminal utility-process orchestration", () => {
 
     await manager.stopSession(session.id);
     expect(workers[0]!.messages.at(-1)).toEqual({ type: "shutdown" });
+    expect(stoppedRuntimes).toEqual([runtime.root]);
   });
 });

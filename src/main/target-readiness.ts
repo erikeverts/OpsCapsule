@@ -21,6 +21,10 @@ import {
   resolveConfiguredPath,
   type ResolvedWorkspaceTarget,
 } from "./workspace-registry.js";
+import {
+  checkColimaPrerequisites,
+  type ExecutableResolver,
+} from "./container-runtimes/colima.js";
 
 function detail(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -194,6 +198,7 @@ export interface TargetReadinessOptions {
   /** Undefined keeps legacy/library callers from consulting host Git. */
   readonly inheritHostGitConfig?: boolean;
   readonly inspectHostGitConfiguration?: HostGitConfigurationInspector;
+  readonly resolveContainerExecutable?: ExecutableResolver;
 }
 
 export async function checkTargetReadiness(
@@ -292,6 +297,34 @@ export async function checkTargetReadiness(
       checks.push({
         id: "isolation",
         label: "Sandbox prerequisites",
+        status: "fail",
+        detail: detail(error),
+      });
+    }
+  }
+
+  if (resolvedTarget.target.containerRuntime) {
+    try {
+      await checkColimaPrerequisites(
+        resolvedTarget,
+        options.resolveContainerExecutable,
+      );
+      checks.push({
+        id: "container-runtime",
+        label: "Isolated containers",
+        status: "warning",
+        detail:
+          "Colima and the Docker CLI are available. The target VM starts with the capsule.",
+        details: [
+          "Containers can mount only this target's configured host directories.",
+          "Container traffic uses the VM network and is not filtered by the capsule process network policy.",
+          "Images, containers, and volumes persist for this target until its Docker environment is reset.",
+        ],
+      });
+    } catch (error) {
+      checks.push({
+        id: "container-runtime",
+        label: "Isolated containers",
         status: "fail",
         detail: detail(error),
       });

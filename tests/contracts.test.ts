@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   deleteWorkspaceInput,
+  resetContainerRuntimeInput,
   startWorkspaceInput,
   terminalAttachmentInput,
   terminalResizeInput,
@@ -41,6 +42,18 @@ describe("IPC contracts", () => {
     ).toEqual({ workspaceId: "atlas", revision: "revision" });
     expect(() =>
       deleteWorkspaceInput.parse({ workspaceId: "atlas", revision: "" }),
+    ).toThrow();
+  });
+
+  it("validates a target-scoped container reset", () => {
+    expect(
+      resetContainerRuntimeInput.parse({
+        workspaceId: "atlas",
+        targetId: "development",
+      }),
+    ).toEqual({ workspaceId: "atlas", targetId: "development" });
+    expect(() =>
+      resetContainerRuntimeInput.parse({ workspaceId: "", targetId: "development" }),
     ).toThrow();
   });
 
