@@ -16,8 +16,12 @@ import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
 import { parseWorkspaceManifest } from "../src/shared/workspace-schema.js";
 
 const temporaryDirectories: string[] = [];
+const temporaryAliases: string[] = [];
 
 afterEach(async () => {
+  await Promise.all(
+    temporaryAliases.splice(0).map((path) => rm(path, { force: true })),
+  );
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
       rm(path, { recursive: true, force: true }),
@@ -113,11 +117,12 @@ describe("isolated container runtime", () => {
       target,
     );
     const paths = runtime.containerRuntime!;
+    temporaryAliases.push(paths.colimaHome);
     const environment = buildWorkspaceEnvironment(runtime, target);
 
     expect(paths.stateDirectory).not.toContain(runtime.targetState);
     expect(paths.dockerConfig).toContain(runtime.targetState);
-    expect(paths.colimaHome).toMatch(/^\/private\/tmp\/opscapsule-cr-/);
+    expect(paths.colimaHome).toContain("opscapsule-cr-");
     expect(Buffer.byteLength(paths.socket) + 1).toBeLessThanOrEqual(104);
     expect(environment.DOCKER_HOST).toBe(`unix://${paths.socket}`);
     expect(environment.DOCKER_CONFIG).toBe(paths.dockerConfig);
@@ -129,6 +134,7 @@ describe("isolated container runtime", () => {
     const targetState = join(root, "target-state");
     await mkdir(targetState, { recursive: true });
     const paths = await createColimaRuntimePaths(root, targetState, target);
+    temporaryAliases.push(paths.colimaHome);
     await mkdir(join(paths.colimaHome, paths.profile), { recursive: true });
     await writeFile(paths.socket, "test socket placeholder");
     const calls: Array<{

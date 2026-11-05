@@ -11,6 +11,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
+import { tmpdir } from "node:os";
 import type { RuntimePaths } from "../../shared/contracts.js";
 import { resolveExecutable } from "../runtime-adapters/readiness.js";
 import type { ResolvedWorkspaceTarget } from "../workspace-registry.js";
@@ -115,7 +116,8 @@ async function aliasToken(stateDirectory: string): Promise<string> {
 
 async function ensureShortStateAlias(stateDirectory: string): Promise<string> {
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
-  const alias = join("/private/tmp", `opscapsule-cr-${await aliasToken(stateDirectory)}`);
+  const aliasRoot = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+  const alias = join(aliasRoot, `opscapsule-cr-${await aliasToken(stateDirectory)}`);
   try {
     const info = await lstat(alias);
     if (!info.isSymbolicLink()) {
