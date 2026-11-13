@@ -4,14 +4,14 @@ import {
   access,
   lstat,
   mkdir,
+  readdir,
   readFile,
-  realpath,
+  rename,
   rm,
-  symlink,
   writeFile,
 } from "node:fs/promises";
 import { dirname, isAbsolute, join, relative } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir } from "node:os";
 import type { RuntimePaths } from "../../shared/contracts.js";
 import { resolveExecutable } from "../runtime-adapters/readiness.js";
 import type { ResolvedWorkspaceTarget } from "../workspace-registry.js";
@@ -19,6 +19,12 @@ import type { ResolvedWorkspaceTarget } from "../workspace-registry.js";
 const PROFILE = "runtime";
 const ALIAS_TOKEN = "state-alias";
 const START_TIMEOUT_MS = 10 * 60 * 1000;
+const UNIX_PATH_MAX = 104;
+const LIMA_SOCKET_SUFFIX = join(
+  "_lima",
+  `colima-${PROFILE}`,
+  "ssh.sock.1234567890123456",
+);
 
 export interface ContainerCommandResult {
   stdout: string;
@@ -70,15 +76,26 @@ export async function hasTargetColimaPersistentData(
   baseDirectory: string,
   resolvedTarget: ResolvedWorkspaceTarget,
 ): Promise<boolean> {
-  const profileDirectory = join(
+  const stateDirectory = join(
     baseDirectory,
     "state",
     "container-runtimes",
     managedStateId(resolvedTarget),
-    PROFILE,
   );
+  if (await pathExists(join(stateDirectory, PROFILE))) {
+    // Pre-short-home builds stored Colima directly under Application Support.
+    return true;
+  }
+  const token = await readAliasToken(stateDirectory);
+  if (!token) {
+    return false;
+  }
+  return pathExists(join(shortRuntimeHome(token), PROFILE));
+}
+
+async function pathExists(path: string): Promise<boolean> {
   try {
-    await lstat(profileDirectory);
+    await lstat(path);
     return true;
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code === "ENOENT") {
@@ -88,57 +105,107 @@ export async function hasTargetColimaPersistentData(
   }
 }
 
-async function aliasToken(stateDirectory: string): Promise<string> {
+function validateAliasToken(path: string, token: string): string {
+  if (!/^[a-f0-9]{20}$/.test(token)) {
+    throw new Error(`Container runtime identity file is invalid: ${path}`);
+  }
+  return token;
+}
+
+async function readAliasToken(
+  stateDirectory: string,
+): Promise<string | undefined> {
   const path = join(stateDirectory, ALIAS_TOKEN);
   try {
     const info = await lstat(path);
     if (!info.isFile() || info.isSymbolicLink()) {
       throw new Error(`Refusing unsafe container runtime identity file: ${path}`);
     }
-    const token = (await readFile(path, "utf8")).trim();
-    if (!/^[a-f0-9]{20}$/.test(token)) {
-      throw new Error(`Container runtime identity file is invalid: ${path}`);
-    }
-    return token;
+    return validateAliasToken(path, (await readFile(path, "utf8")).trim());
   } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-      throw error;
+    if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+      return undefined;
     }
-    const token = randomBytes(10).toString("hex");
-    await writeFile(path, `${token}\n`, {
-      encoding: "utf8",
-      flag: "wx",
-      mode: 0o600,
-    });
-    return token;
+    throw error;
   }
 }
 
-async function ensureShortStateAlias(stateDirectory: string): Promise<string> {
+async function aliasToken(stateDirectory: string): Promise<string> {
+  const existing = await readAliasToken(stateDirectory);
+  if (existing) {
+    return existing;
+  }
+  const path = join(stateDirectory, ALIAS_TOKEN);
+  const token = randomBytes(10).toString("hex");
+  await writeFile(path, `${token}\n`, {
+    encoding: "utf8",
+    flag: "wx",
+    mode: 0o600,
+  });
+  return token;
+}
+
+function shortRuntimeHome(
+  token: string,
+  runtimeRoot = join(homedir(), ".opscapsule", "cr"),
+): string {
+  const path = join(runtimeRoot, token);
+  const longestSocket = join(path, LIMA_SOCKET_SUFFIX);
+  if (Buffer.byteLength(longestSocket) + 1 > UNIX_PATH_MAX) {
+    throw new Error(
+      `The target-owned container runtime path is too long for macOS Unix sockets: ${longestSocket}`,
+    );
+  }
+  return path;
+}
+
+async function ensureShortPersistentState(
+  stateDirectory: string,
+  runtimeRoot?: string,
+): Promise<string> {
   await mkdir(stateDirectory, { recursive: true, mode: 0o700 });
-  const aliasRoot = process.platform === "darwin" ? "/private/tmp" : tmpdir();
-  const alias = join(aliasRoot, `opscapsule-cr-${await aliasToken(stateDirectory)}`);
-  try {
-    const info = await lstat(alias);
-    if (!info.isSymbolicLink()) {
-      throw new Error(`Refusing occupied container runtime alias: ${alias}`);
+  const token = await aliasToken(stateDirectory);
+  const runtimeHome = shortRuntimeHome(token, runtimeRoot);
+  await mkdir(runtimeHome, { recursive: true, mode: 0o700 });
+
+  // The first implementation used a /private/tmp symlink to this directory.
+  // Lima resolves symlinks before constructing its SSH socket path, so that did
+  // not actually avoid macOS's 104-byte Unix socket limit. Move any state made
+  // by that build into the genuinely short, persistent home. The operation is
+  // idempotent so an interrupted migration can continue on the next launch.
+  const legacyEntries = (await readdir(stateDirectory)).filter(
+    (entry) => entry !== ALIAS_TOKEN,
+  );
+  for (const entry of legacyEntries) {
+    const source = join(stateDirectory, entry);
+    const destination = join(runtimeHome, entry);
+    if (await pathExists(destination)) {
+      throw new Error(
+        `Cannot migrate container runtime state because both locations contain '${entry}': ${source} and ${destination}`,
+      );
     }
-    if ((await realpath(alias)) !== (await realpath(stateDirectory))) {
-      throw new Error(`Container runtime alias points at an unexpected location: ${alias}`);
+    await rename(source, destination);
+  }
+
+  const legacyAlias = join("/private/tmp", `opscapsule-cr-${token}`);
+  try {
+    const info = await lstat(legacyAlias);
+    if (info.isSymbolicLink()) {
+      await rm(legacyAlias, { force: true });
     }
   } catch (error) {
     if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
       throw error;
     }
-    await symlink(stateDirectory, alias, "dir");
   }
-  return alias;
+  return runtimeHome;
 }
 
 export async function createColimaRuntimePaths(
   baseDirectory: string,
   targetState: string,
   resolvedTarget: ResolvedWorkspaceTarget,
+  runtimeRoot?: string,
 ): Promise<NonNullable<RuntimePaths["containerRuntime"]>> {
   const stateDirectory = join(
     baseDirectory,
@@ -146,7 +213,10 @@ export async function createColimaRuntimePaths(
     "container-runtimes",
     managedStateId(resolvedTarget),
   );
-  const colimaHome = await ensureShortStateAlias(stateDirectory);
+  const colimaHome = await ensureShortPersistentState(
+    stateDirectory,
+    runtimeRoot,
+  );
   const dockerConfig = join(targetState, "container-runtime", "docker-config");
   await mkdir(dockerConfig, { recursive: true, mode: 0o700 });
   return {
@@ -254,7 +324,7 @@ function colimaEnvironment(
     ...process.env,
     COLIMA_HOME: paths.colimaHome,
     COLIMA_PROFILE: paths.profile,
-    COLIMA_CACHE_HOME: join(paths.stateDirectory, "cache"),
+    COLIMA_CACHE_HOME: join(paths.colimaHome, "cache"),
     LIMA_HOME: join(paths.colimaHome, "_lima"),
     DOCKER_CONFIG: paths.dockerConfig,
   };

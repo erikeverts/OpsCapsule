@@ -358,6 +358,8 @@ export interface WorkspaceRuntimeOptions {
   readonly inheritHostGitConfig?: boolean;
   readonly inspectHostGitConfiguration?: HostGitConfigurationInspector;
   readonly resolveHostGitExecutable?: HostGitExecutableResolver;
+  /** Test/embedding override; production uses ~/.opscapsule/cr. */
+  readonly containerRuntimeHomeRoot?: string;
 }
 
 export async function createWorkspaceRuntime(
@@ -523,6 +525,7 @@ export async function createWorkspaceRuntime(
         baseDirectory,
         targetState,
         resolvedTarget,
+        options.containerRuntimeHomeRoot,
       )
     : undefined;
 

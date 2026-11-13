@@ -56,6 +56,10 @@ environment** deletes all of those for the selected target and recreates an
 empty client state directory. It is intentionally a confirmed destructive
 action and is unavailable while the capsule is running.
 
+The VM's persistent provider state is stored under the short, application-owned
+`~/.opscapsule/cr/` tree. This location is outside the capsule filesystem grant
+and keeps Colima and Lima Unix sockets below macOS's path-length limit.
+
 Workspace deletion never treats container data as incidental state. If a target
 has created a VM, OpsCapsule asks you to reset that Docker environment first;
 deleting the workspace cannot silently remove images or volumes.
