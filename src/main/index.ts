@@ -21,6 +21,7 @@ import {
   credentialOverviewInput,
   credentialStatusInput,
   openExternalInput,
+  resetContainerRuntimeInput,
   savePreferencesInput,
   deleteWorkspaceInput,
   discoverPathAliasesInput,
@@ -82,6 +83,11 @@ import {
 } from "./renderer-protocol.js";
 import { initializeHostToolEnvironment } from "./host-tools.js";
 import { resolveHostGitConfigInheritance } from "../shared/git-config.js";
+import {
+  ColimaContainerRuntime,
+  createTargetColimaRuntimePaths,
+  hasTargetColimaPersistentData,
+} from "./container-runtimes/colima.js";
 
 app.setName("OpsCapsule");
 protocol.registerSchemesAsPrivileged([
@@ -104,6 +110,7 @@ if (isPackagedSmokeTest && smokeUserData) {
 
 let mainWindow: BrowserWindow | null = null;
 let workspaceRegistry: WorkspaceRegistry;
+const containerRuntime = new ColimaContainerRuntime();
 const hasSingleInstanceLock =
   isPackagedSmokeTest || app.requestSingleInstanceLock();
 
@@ -115,6 +122,7 @@ const terminalManager = new TerminalManager({
   forkWorker: (workerPath, options) =>
     utilityProcess.fork(workerPath, [], options),
   workerPath: join(__dirname, "terminal-worker.cjs"),
+  onSessionStopped: (runtime) => containerRuntime.stop(runtime),
 });
 
 function registerRendererProtocol(): void {
@@ -152,6 +160,26 @@ function registerIpcHandlers(): void {
       throw new Error(
         "Stop every capsule in this workspace before deleting it",
       );
+    }
+    const document = await workspaceRegistry.document(workspaceId);
+    for (const target of document.manifest.targets) {
+      if (!target.containerRuntime) {
+        continue;
+      }
+      const resolvedTarget = await workspaceRegistry.resolveTarget(
+        workspaceId,
+        target.id,
+      );
+      if (
+        await hasTargetColimaPersistentData(
+          app.getPath("userData"),
+          resolvedTarget,
+        )
+      ) {
+        throw new Error(
+          `Reset the Docker environment for target '${target.name}' before deleting this workspace. This keeps container data from being deleted as a side effect.`,
+        );
+      }
     }
     await workspaceRegistry.deleteWorkspace(workspaceId, revision);
   });
@@ -412,6 +440,7 @@ function registerIpcHandlers(): void {
     );
     let broker: CredentialBrokerSession | undefined;
     try {
+      await containerRuntime.start(runtime, resolvedTarget);
       const isolation = await prepareIsolation(runtime, resolvedTarget);
 
       const references = [
@@ -442,6 +471,7 @@ function registerIpcHandlers(): void {
       );
     } catch (error) {
       await broker?.close();
+      await containerRuntime.stop(runtime);
       await cleanupWorkspaceRuntime(runtime);
       throw error;
     }
@@ -466,6 +496,25 @@ function registerIpcHandlers(): void {
   ipcMain.handle(IPC.stopWorkspace, async (_event, input: unknown) => {
     const { sessionId } = stopWorkspaceInput.parse(input);
     await terminalManager.stopSession(sessionId);
+  });
+
+  ipcMain.handle(IPC.resetContainerRuntime, async (_event, input: unknown) => {
+    const { workspaceId, targetId } = resetContainerRuntimeInput.parse(input);
+    if (terminalManager.hasActiveTarget(workspaceId, targetId)) {
+      throw new Error("Stop this capsule before resetting its Docker environment");
+    }
+    const resolvedTarget = await workspaceRegistry.resolveTarget(
+      workspaceId,
+      targetId,
+    );
+    if (!resolvedTarget.target.containerRuntime) {
+      throw new Error("This target does not declare a container runtime");
+    }
+    const paths = await createTargetColimaRuntimePaths(
+      app.getPath("userData"),
+      resolvedTarget,
+    );
+    await containerRuntime.reset(paths, resolvedTarget);
   });
 }
 

@@ -70,6 +70,8 @@ const api: OpsCapsuleApi = {
     }),
   stopWorkspace: (sessionId) =>
     ipcRenderer.invoke(IPC.stopWorkspace, { sessionId }),
+  resetContainerRuntime: (workspaceId, targetId) =>
+    ipcRenderer.invoke(IPC.resetContainerRuntime, { workspaceId, targetId }),
   onTerminalData: (listener) => {
     const handler = (_event: Electron.IpcRendererEvent, data: TerminalDataEvent) =>
       listener(data);

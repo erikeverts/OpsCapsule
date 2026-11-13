@@ -63,7 +63,7 @@ The Iteration 4 agent-profile extension is described in
 - Directories declare read-only or read-write access.
 - A target selects at most one cloud identity, at most one Kubernetes context,
   one or more directories, and optionally overrides the workspace's default agent
-  profile.
+  profile. It may also opt in to a target-owned container runtime.
 - A capsule is one running instance of one target.
 
 Reusable agent configuration belongs to the workspace. Existing
@@ -118,7 +118,15 @@ Network modes are:
 - `deny`: no outbound network access;
 - `allowlist`: only the listed public domains; and
 - `public`: any public destination, while local services, cloud metadata endpoints,
-  and Unix sockets remain blocked by the sandbox runtime.
+  and Unix sockets remain blocked by the sandbox runtime. Narrow application
+  services are exceptions by exact pathname: the session credential broker and,
+  when configured, the target-owned container engine socket.
+
+An optional `containerRuntime` gives the target its own Colima Docker VM rather
+than the shared host daemon. It requires enforced isolation and public network
+mode. See [`container-runtimes.md`](container-runtimes.md) and
+[`ADR 0010`](adr/0010-target-owned-container-runtimes.md) for the boundary and
+the current container-network limitation.
 
 Permission-expanding manifests belong in the trusted application-data directory,
 not inside an untrusted repository. A future import flow may read repository hints,

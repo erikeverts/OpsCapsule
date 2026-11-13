@@ -45,6 +45,8 @@ The current iteration provides:
 - concurrent target capsules with distinct environments, synthetic homes,
   temporary directories, and single-context kubeconfigs;
 - OS-enforced filesystem and network policies for every terminal process;
+- optional target-owned Colima Docker engines that expose one exact socket and
+  only the target's configured directory mounts;
 - three PTY-backed terminals per capsule: one agent runtime and two shells;
 - a generic command runtime adapter for any interactive agent CLI;
 - a sandboxed Electron renderer with a narrow, validated preload API; and
@@ -64,6 +66,10 @@ Enforced isolation additionally requires:
 
 - macOS: `rg` (ripgrep); or
 - Linux: `bwrap`, `socat`, and `rg`.
+
+Isolated Docker targets on macOS additionally require `colima` and the `docker`
+CLI. Their container traffic uses VM egress and is not covered by the capsule's
+process network filter; see [isolated containers](docs/container-runtimes.md).
 
 Windows can parse the same manifests but currently requires explicit
 `context-only` mode while its isolation backend is evaluated.
@@ -124,4 +130,6 @@ facts a workspace carries, and how they reach the agent, are described in
 [workspace context](docs/workspace-context.md). Application settings, and how
 themes are defined, are described in [preferences](docs/preferences.md). Safe
 host Git identity inheritance is recorded in
-[ADR 0009](docs/adr/0009-safe-host-git-configuration.md).
+[ADR 0009](docs/adr/0009-safe-host-git-configuration.md). Target-owned Docker
+VMs and the decision not to expose a shared host daemon are documented in
+[ADR 0010](docs/adr/0010-target-owned-container-runtimes.md).

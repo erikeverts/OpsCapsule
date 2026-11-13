@@ -116,6 +116,27 @@ describe("sandbox policy", () => {
     expect(settings.allowPty).toBe(true);
   });
 
+  it("allows only explicitly named service sockets", () => {
+    const settings = buildSandboxRuntimeSettings({
+      deniedReadPaths: ["/Users", "/private/tmp"],
+      readOnlyPaths: [],
+      readWritePaths: ["/workspace"],
+      network: { mode: "public", allowedDomains: [] },
+      userHome: "/Users/example",
+      allowedUnixSockets: [
+        "/private/tmp/capsule/broker.sock",
+        "/private/tmp/opscapsule-cr-target/runtime/docker.sock",
+      ],
+    });
+
+    expect(settings.network.allowUnixSockets).toEqual([
+      "/private/tmp/capsule/broker.sock",
+      "/private/tmp/opscapsule-cr-target/runtime/docker.sock",
+    ]);
+    expect(settings.network.allowAllUnixSockets).toBe(false);
+    expect(settings.network.allowLocalBinding).toBe(false);
+  });
+
   it.each([
     ["example.com", true],
     ["8.8.8.8", true],

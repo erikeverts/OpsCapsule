@@ -935,7 +935,10 @@ export function WorkspaceEditor({
     }
     const confirmed = window.confirm(
       `Delete workspace "${document.manifest.metadata.name}"?\n\n` +
-        "This permanently removes its manifest, imported configuration copies, and target-specific OpsCapsule state. Referenced project folders and repositories will not be deleted.",
+        "This permanently removes its manifest, imported configuration copies, and target-specific OpsCapsule state. Referenced project folders and repositories will not be deleted." +
+        (document.manifest.targets.some((target) => target.containerRuntime)
+          ? "\n\nDocker images, containers, and volumes are never deleted as a side effect. Reset each target's Docker environment first."
+          : ""),
     );
     if (!confirmed) {
       return;
@@ -3073,8 +3076,105 @@ export function WorkspaceEditor({
                           </Field>
                         </>
                       ) : null}
+                      <div className="studio-field studio-field-wide">
+                        <span>Containers</span>
+                        <label className="checkbox-field">
+                          <input
+                            checked={Boolean(target.containerRuntime)}
+                            onChange={(event) =>
+                              updateDraft((next) => {
+                                const item = next.targets[index]!;
+                                if (event.target.checked) {
+                                  item.containerRuntime = {
+                                    mode: "isolated",
+                                    provider: "colima",
+                                    persistence: "target",
+                                    resources: {
+                                      cpus: 4,
+                                      memoryGiB: 8,
+                                      diskGiB: 60,
+                                    },
+                                  };
+                                  item.isolation.mode = "enforced";
+                                  item.isolation.network = {
+                                    mode: "public",
+                                    allowedDomains: [],
+                                  };
+                                } else {
+                                  delete item.containerRuntime;
+                                }
+                              })
+                            }
+                            type="checkbox"
+                          />
+                          <span>
+                            Enable isolated Docker
+                            <span className="field-hint">
+                              Runs a target-owned Colima VM. The shared host
+                              Docker socket is never exposed.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      {target.containerRuntime ? (
+                        <>
+                          <Field label="Container CPUs">
+                            <input
+                              min={1}
+                              max={32}
+                              type="number"
+                              value={target.containerRuntime.resources.cpus}
+                              onChange={(event) =>
+                                updateDraft((next) => {
+                                  next.targets[index]!.containerRuntime!.resources.cpus =
+                                    Number(event.target.value);
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field label="Container memory (GiB)">
+                            <input
+                              min={2}
+                              max={128}
+                              type="number"
+                              value={target.containerRuntime.resources.memoryGiB}
+                              onChange={(event) =>
+                                updateDraft((next) => {
+                                  next.targets[index]!.containerRuntime!.resources.memoryGiB =
+                                    Number(event.target.value);
+                                })
+                              }
+                            />
+                          </Field>
+                          <Field
+                            label="Container disk (GiB)"
+                            hint="Images, containers, and volumes persist per target."
+                          >
+                            <input
+                              min={20}
+                              max={1024}
+                              type="number"
+                              value={target.containerRuntime.resources.diskGiB}
+                              onChange={(event) =>
+                                updateDraft((next) => {
+                                  next.targets[index]!.containerRuntime!.resources.diskGiB =
+                                    Number(event.target.value);
+                                })
+                              }
+                            />
+                          </Field>
+                          <p className="field-hint studio-field-wide">
+                            The capsule filesystem boundary still applies, but
+                            container traffic leaves through the VM and is not
+                            filtered by OpsCapsule's process network policy.
+                            Public network mode is therefore required in this
+                            iteration.
+                          </p>
+                        </>
+                      ) : null}
                       <Field label="Isolation">
                         <select
+                          disabled={Boolean(target.containerRuntime)}
                           value={target.isolation.mode}
                           onChange={(event) =>
                             updateDraft((next) => {
@@ -3090,6 +3190,7 @@ export function WorkspaceEditor({
                       </Field>
                       <Field label="Network">
                         <select
+                          disabled={Boolean(target.containerRuntime)}
                           value={target.isolation.network.mode}
                           onChange={(event) =>
                             updateDraft((next) => {

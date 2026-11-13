@@ -90,6 +90,9 @@ const reservedAgentEnvironmentVariables = new Set([
   "GIT_CONFIG_SYSTEM",
   "GIT_CONFIG_NOSYSTEM",
   "GIT_CONFIG_COUNT",
+  "DOCKER_HOST",
+  "DOCKER_CONTEXT",
+  "DOCKER_CONFIG",
 ]);
 
 export const agentConfigurationFileSchema = z.object({
@@ -236,6 +239,19 @@ const networkPolicySchema = z
     }
   });
 
+export const containerRuntimeSchema = z.object({
+  mode: z.literal("isolated"),
+  provider: z.literal("colima").default("colima"),
+  persistence: z.literal("target").default("target"),
+  resources: z
+    .object({
+      cpus: z.number().int().min(1).max(32).default(4),
+      memoryGiB: z.number().int().min(2).max(128).default(8),
+      diskGiB: z.number().int().min(20).max(1024).default(60),
+    })
+    .default({ cpus: 4, memoryGiB: 8, diskGiB: 60 }),
+});
+
 export const targetSchema = z.object({
   id: identifier,
   name: z.string().min(1),
@@ -251,6 +267,8 @@ export const targetSchema = z.object({
   operationalCredential: identifier.optional(),
   /** Overrides workspace context entries with the same key. */
   context: workspaceContextSchema,
+  /** A target-owned VM engine; never a passthrough to the host Docker socket. */
+  containerRuntime: containerRuntimeSchema.optional(),
   isolation: z.object({
     mode: z.enum(["enforced", "context-only"]).default("enforced"),
     network: networkPolicySchema.default({
@@ -303,6 +321,9 @@ export type CloudConnection = z.infer<typeof cloudConnectionSchema>;
 export type KubernetesContext = z.infer<typeof kubernetesContextSchema>;
 export type WorkspaceDirectory = z.infer<typeof directorySchema>;
 export type WorkspaceTarget = z.infer<typeof targetSchema>;
+export type ContainerRuntimeConfiguration = z.infer<
+  typeof containerRuntimeSchema
+>;
 
 function assertUniqueMetadataKeys(
   entries: Array<{ key: string }>,
@@ -457,6 +478,19 @@ export function validateWorkspaceReferences(
     if (!target.directories.includes(target.defaultDirectory)) {
       throw new Error(
         `Target '${target.id}' default directory must also appear in its directories list`,
+      );
+    }
+    if (target.containerRuntime && target.isolation.mode !== "enforced") {
+      throw new Error(
+        `Target '${target.id}' needs enforced isolation for its container runtime`,
+      );
+    }
+    if (
+      target.containerRuntime &&
+      target.isolation.network.mode !== "public"
+    ) {
+      throw new Error(
+        `Target '${target.id}' container runtime currently requires public network mode`,
       );
     }
   }

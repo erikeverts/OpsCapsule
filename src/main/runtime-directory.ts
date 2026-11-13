@@ -53,6 +53,7 @@ import {
   type HostGitExecutableResolver,
   type HostGitConfigurationInspector,
 } from "./git-config.js";
+import { createColimaRuntimePaths } from "./container-runtimes/colima.js";
 
 const inheritedEnvironmentVariables = new Set([
   "PATH",
@@ -517,6 +518,13 @@ export async function createWorkspaceRuntime(
       // The original PATH remains available if the shim cannot be created.
     }
   }
+  const containerRuntime = resolvedTarget.target.containerRuntime
+    ? await createColimaRuntimePaths(
+        baseDirectory,
+        targetState,
+        resolvedTarget,
+      )
+    : undefined;
 
   return {
     root,
@@ -532,6 +540,7 @@ export async function createWorkspaceRuntime(
     ...(agentInstructions ? { agentInstructions } : {}),
     ...(brokerSocket ? { brokerSocket } : {}),
     ...(brokerHelper ? { brokerHelper } : {}),
+    ...(containerRuntime ? { containerRuntime } : {}),
     context: contextDirectory,
   };
 }
@@ -625,6 +634,12 @@ export function buildWorkspaceEnvironment(
     TEMP: runtime.temp,
     CLAUDE_CODE_TMPDIR: runtime.temp,
     KUBECONFIG: runtime.kubeconfig,
+    ...(runtime.containerRuntime
+      ? {
+          DOCKER_HOST: `unix://${runtime.containerRuntime.socket}`,
+          DOCKER_CONFIG: runtime.containerRuntime.dockerConfig,
+        }
+      : {}),
     // GIT_CONFIG_GLOBAL replaces the user's global file, but Git otherwise
     // still reads a platform system file. macOS puts osxkeychain there, which
     // would silently reintroduce a credential helper into the capsule.
