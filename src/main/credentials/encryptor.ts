@@ -8,10 +8,10 @@ import type { SecretEncryptor } from "./store.js";
  * calls `basic_text`, which encrypts with a hardcoded key. That is obfuscation,
  * not encryption: anyone who can read the file can read the secret.
  *
- * `isEncryptionAvailable()` returns true in that state, so taking it at face
- * value would have OpsCapsule store credentials it believes are protected. The
- * store is built to fail closed rather than degrade to plaintext, and this is
- * what makes that true on Linux as well as macOS.
+ * `isAsyncEncryptionAvailable()` returns true in that state, so taking it at
+ * face value would have OpsCapsule store credentials it believes are protected.
+ * The store is built to fail closed rather than degrade to plaintext, and this
+ * is what makes that true on Linux as well as macOS.
  */
 export type LinuxStorageBackend = ReturnType<
   typeof safeStorage.getSelectedStorageBackend
@@ -30,13 +30,15 @@ export function isProtectedBackend(backend: string): boolean {
 export function createSecretEncryptor(
   storage: Pick<
     typeof safeStorage,
-    "isEncryptionAvailable" | "encryptString" | "decryptString"
+    | "isAsyncEncryptionAvailable"
+    | "encryptStringAsync"
+    | "decryptStringAsync"
   > & { getSelectedStorageBackend?: () => string },
   platform: NodeJS.Platform = process.platform,
 ): SecretEncryptor {
   return {
-    isEncryptionAvailable() {
-      if (!storage.isEncryptionAvailable()) {
+    async isEncryptionAvailable() {
+      if (!(await storage.isAsyncEncryptionAvailable())) {
         return false;
       }
       if (platform !== "linux") {
@@ -46,8 +48,8 @@ export function createSecretEncryptor(
       const backend = storage.getSelectedStorageBackend?.();
       return backend === undefined ? true : isProtectedBackend(backend);
     },
-    encryptString: (value) => storage.encryptString(value),
-    decryptString: (value) => storage.decryptString(value),
+    encryptString: (value) => storage.encryptStringAsync(value),
+    decryptString: (value) => storage.decryptStringAsync(value),
     unavailableReason: () => describeUnavailableStorage(platform),
   };
 }

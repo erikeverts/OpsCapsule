@@ -131,7 +131,7 @@ async function main(): Promise<number> {
   }
 
   const encryptor = createSecretEncryptor(safeStorage);
-  if (!encryptor.isEncryptionAvailable()) {
+  if (!(await encryptor.isEncryptionAvailable())) {
     console.error(encryptor.unavailableReason?.() ?? "Encryption is unavailable.");
     return 1;
   }

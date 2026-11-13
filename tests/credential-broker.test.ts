@@ -103,15 +103,15 @@ const awsPayload = awsDelivery.formatResponse(JSON.stringify(issued));
 /** Reversible stand-in for Electron safeStorage. */
 function fakeEncryptor(available = true) {
   return {
-    isEncryptionAvailable: () => available,
-    encryptString: (value: string) =>
+    isEncryptionAvailable: async () => available,
+    encryptString: async (value: string) =>
       Buffer.from(`enc:${value}`, "utf8"),
-    decryptString: (buffer: Buffer) => {
+    decryptString: async (buffer: Buffer) => {
       const text = buffer.toString("utf8");
       if (!text.startsWith("enc:")) {
         throw new Error("not decryptable");
       }
-      return text.slice(4);
+      return { result: text.slice(4), shouldReEncrypt: false };
     },
   };
 }
@@ -164,6 +164,33 @@ describe("credential store", () => {
 
     await store.forget(inference);
     expect(await store.has(inference)).toBe(false);
+  });
+
+  it("re-encrypts a secret when the OS key provider requests rotation", async () => {
+    const base = await temporaryRoot("oc-store-rotate-");
+    let encryptions = 0;
+    const store = new CredentialStore(base, {
+      isEncryptionAvailable: async () => true,
+      encryptString: async (value: string) => {
+        encryptions += 1;
+        return Buffer.from(`${encryptions === 1 ? "old" : "new"}:${value}`);
+      },
+      decryptString: async (buffer: Buffer) => {
+        const [version, ...secret] = buffer.toString("utf8").split(":");
+        return {
+          result: secret.join(":"),
+          shouldReEncrypt: version === "old",
+        };
+      },
+    });
+
+    await store.write(inference, "super-secret");
+    expect(await store.read(inference)).toBe("super-secret");
+    expect(
+      await readFile(credentialSecretPath(base, inference, {}), "utf8"),
+    ).toBe("new:super-secret");
+    expect(await store.read(inference)).toBe("super-secret");
+    expect(encryptions).toBe(2);
   });
 
   it("refuses to store anything when OS encryption is unavailable", async () => {
