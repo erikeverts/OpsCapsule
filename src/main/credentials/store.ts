@@ -9,9 +9,12 @@ import type { CredentialReference, CredentialScope } from "../../shared/credenti
  * key lives in the OS keychain rather than in any file OpsCapsule controls.
  */
 export interface SecretEncryptor {
-  isEncryptionAvailable(): boolean;
-  encryptString(plainText: string): Buffer;
-  decryptString(encrypted: Buffer): string;
+  isEncryptionAvailable(): Promise<boolean>;
+  encryptString(plainText: string): Promise<Buffer>;
+  decryptString(encrypted: Buffer): Promise<{
+    result: string;
+    shouldReEncrypt: boolean;
+  }>;
   /** Explains why storage is refused, when it is. */
   unavailableReason?(): string;
 }
@@ -98,12 +101,18 @@ export class CredentialStore {
     return credentialSecretPath(this.baseDirectory, reference, context);
   }
 
-  private assertAvailable(): void {
-    if (!this.encryptor.isEncryptionAvailable()) {
+  private async assertAvailable(): Promise<void> {
+    if (!(await this.encryptor.isEncryptionAvailable())) {
       throw new CredentialStorageUnavailableError(
         this.encryptor.unavailableReason?.(),
       );
     }
+  }
+
+  private async writeEncrypted(path: string, encrypted: Buffer): Promise<void> {
+    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
+    await writeFile(path, encrypted, { mode: 0o600 });
+    await chmod(path, 0o600);
   }
 
   async write(
@@ -111,18 +120,16 @@ export class CredentialStore {
     secret: string,
     context: CredentialStoreContext = {},
   ): Promise<void> {
-    this.assertAvailable();
+    await this.assertAvailable();
     const path = this.pathFor(reference, context);
-    await mkdir(dirname(path), { recursive: true, mode: 0o700 });
-    await writeFile(path, this.encryptor.encryptString(secret), { mode: 0o600 });
-    await chmod(path, 0o600);
+    await this.writeEncrypted(path, await this.encryptor.encryptString(secret));
   }
 
   async read(
     reference: CredentialReference,
     context: CredentialStoreContext = {},
   ): Promise<string> {
-    this.assertAvailable();
+    await this.assertAvailable();
     const path = this.pathFor(reference, context);
     let encrypted: Buffer;
     try {
@@ -133,13 +140,24 @@ export class CredentialStore {
       }
       throw error;
     }
+    let decrypted: Awaited<ReturnType<SecretEncryptor["decryptString"]>>;
     try {
-      return this.encryptor.decryptString(encrypted);
+      decrypted = await this.encryptor.decryptString(encrypted);
     } catch {
       // A secret that cannot be decrypted is treated as absent rather than as
       // a hard crash: the keychain entry may belong to another machine or user.
       throw new CredentialNotStoredError(reference.id);
     }
+    if (decrypted.shouldReEncrypt) {
+      // Electron sets this when the OS key has rotated or a stronger key
+      // provider has become available. Upgrade the ciphertext in place so the
+      // next read no longer depends on the old key.
+      await this.writeEncrypted(
+        path,
+        await this.encryptor.encryptString(decrypted.result),
+      );
+    }
+    return decrypted.result;
   }
 
   async has(
