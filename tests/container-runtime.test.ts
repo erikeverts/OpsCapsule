@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { lstat, mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
@@ -16,11 +16,13 @@ import { WorkspaceRegistry } from "../src/main/workspace-registry.js";
 import { parseWorkspaceManifest } from "../src/shared/workspace-schema.js";
 
 const temporaryDirectories: string[] = [];
-const temporaryAliases: string[] = [];
+const temporaryRuntimeHomes: string[] = [];
 
 afterEach(async () => {
   await Promise.all(
-    temporaryAliases.splice(0).map((path) => rm(path, { force: true })),
+    temporaryRuntimeHomes.splice(0).map((path) =>
+      rm(path, { recursive: true, force: true }),
+    ),
   );
   await Promise.all(
     temporaryDirectories.splice(0).map((path) =>
@@ -51,6 +53,13 @@ async function configuredTarget() {
     root,
     target: await registry.resolveTarget("atlas", "development"),
   };
+}
+
+async function shortRuntimeRoot(): Promise<string> {
+  const parent = process.platform === "darwin" ? "/private/tmp" : tmpdir();
+  const root = await mkdtemp(join(parent, "ocr-test-"));
+  temporaryDirectories.push(root);
+  return root;
 }
 
 describe("isolated container runtime", () => {
@@ -109,32 +118,64 @@ describe("isolated container runtime", () => {
     );
   });
 
-  it("uses a short socket alias and target-private Docker client state", async () => {
+  it("uses a genuinely short persistent runtime home and target-private Docker client state", async () => {
     const { root, target } = await configuredTarget();
+    const runtimeRoot = await shortRuntimeRoot();
     const runtime = await createWorkspaceRuntime(
       root,
       "container-session",
       target,
+      undefined,
+      { containerRuntimeHomeRoot: runtimeRoot },
     );
     const paths = runtime.containerRuntime!;
-    temporaryAliases.push(paths.colimaHome);
+    temporaryRuntimeHomes.push(paths.colimaHome);
     const environment = buildWorkspaceEnvironment(runtime, target);
 
     expect(paths.stateDirectory).not.toContain(runtime.targetState);
     expect(paths.dockerConfig).toContain(runtime.targetState);
-    expect(paths.colimaHome).toContain("opscapsule-cr-");
+    expect(paths.colimaHome).toContain(runtimeRoot);
+    expect((await lstat(paths.colimaHome)).isSymbolicLink()).toBe(false);
     expect(Buffer.byteLength(paths.socket) + 1).toBeLessThanOrEqual(104);
+    expect(
+      Buffer.byteLength(
+        join(
+          paths.colimaHome,
+          "_lima",
+          `colima-${paths.profile}`,
+          "ssh.sock.1234567890123456",
+        ),
+      ) + 1,
+    ).toBeLessThanOrEqual(104);
     expect(environment.DOCKER_HOST).toBe(`unix://${paths.socket}`);
     expect(environment.DOCKER_CONFIG).toBe(paths.dockerConfig);
     expect(environment.DOCKER_CONTEXT).toBeUndefined();
+
+    const legacyEntry = join(paths.stateDirectory, "legacy-cache");
+    await mkdir(legacyEntry);
+    await createColimaRuntimePaths(
+      root,
+      runtime.targetState,
+      target,
+      runtimeRoot,
+    );
+    expect((await lstat(join(paths.colimaHome, "legacy-cache"))).isDirectory())
+      .toBe(true);
+    await expect(lstat(legacyEntry)).rejects.toMatchObject({ code: "ENOENT" });
   });
 
   it("starts Colima without host activation, home mounts, or SSH forwarding", async () => {
     const { root, target } = await configuredTarget();
+    const runtimeRoot = await shortRuntimeRoot();
     const targetState = join(root, "target-state");
     await mkdir(targetState, { recursive: true });
-    const paths = await createColimaRuntimePaths(root, targetState, target);
-    temporaryAliases.push(paths.colimaHome);
+    const paths = await createColimaRuntimePaths(
+      root,
+      targetState,
+      target,
+      runtimeRoot,
+    );
+    temporaryRuntimeHomes.push(paths.colimaHome);
     await mkdir(join(paths.colimaHome, paths.profile), { recursive: true });
     await writeFile(paths.socket, "test socket placeholder");
     const calls: Array<{
@@ -187,6 +228,7 @@ describe("isolated container runtime", () => {
       expect.objectContaining({
         COLIMA_HOME: paths.colimaHome,
         LIMA_HOME: join(paths.colimaHome, "_lima"),
+        COLIMA_CACHE_HOME: join(paths.colimaHome, "cache"),
         DOCKER_CONFIG: paths.dockerConfig,
       }),
     );

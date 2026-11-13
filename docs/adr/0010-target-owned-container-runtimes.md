@@ -34,8 +34,10 @@ exact Unix socket, `DOCKER_CONFIG` points at target-private client state, and th
 sandbox continues to reject every other Unix socket.
 
 Colima state is application-managed and remains outside the capsule filesystem
-allowlist. A stable short alias under `/private/tmp` keeps the socket below the
-macOS Unix-domain path limit without relocating the persistent VM data.
+allowlist. Persistent VM state lives under the deliberately short
+`~/.opscapsule/cr/<target-token>` path. A real short directory is required:
+Lima resolves symlinks before constructing its internal sockets, and macOS
+rejects those sockets when their resolved path reaches its Unix-domain limit.
 
 The manifest contract is provider-neutral at the target boundary even though
 the current provider enum contains only `colima`:
