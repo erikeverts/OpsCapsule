@@ -10,9 +10,12 @@ const storage = (
   available: boolean,
   backend?: string,
 ) => ({
-  isEncryptionAvailable: () => available,
-  encryptString: (value: string) => Buffer.from(value),
-  decryptString: (value: Buffer) => value.toString(),
+  isAsyncEncryptionAvailable: async () => available,
+  encryptStringAsync: async (value: string) => Buffer.from(value),
+  decryptStringAsync: async (value: Buffer) => ({
+    result: value.toString(),
+    shouldReEncrypt: false,
+  }),
   ...(backend === undefined ? {} : { getSelectedStorageBackend: () => backend }),
 });
 
@@ -32,36 +35,36 @@ describe("Linux keyring backends", () => {
 });
 
 describe("encryptor", () => {
-  it("refuses to store on Linux when the keyring is missing", () => {
+  it("refuses to store on Linux when the keyring is missing", async () => {
     // safeStorage reports encryption as available in this state, so taking it
     // at face value would store credentials that are not protected.
     const encryptor = createSecretEncryptor(storage(true, "basic_text"), "linux");
-    expect(encryptor.isEncryptionAvailable()).toBe(false);
+    await expect(encryptor.isEncryptionAvailable()).resolves.toBe(false);
     expect(encryptor.unavailableReason?.()).toMatch(/keyring/);
   });
 
-  it("allows storage on Linux with a real keyring", () => {
-    expect(
+  it("allows storage on Linux with a real keyring", async () => {
+    await expect(
       createSecretEncryptor(storage(true, "gnome_libsecret"), "linux")
         .isEncryptionAvailable(),
-    ).toBe(true);
+    ).resolves.toBe(true);
   });
 
-  it("does not consult a backend on platforms that have none", () => {
+  it("does not consult a backend on platforms that have none", async () => {
     // Only Linux exposes a backend, and only Linux has a weak one.
-    expect(
+    await expect(
       createSecretEncryptor(storage(true), "darwin").isEncryptionAvailable(),
-    ).toBe(true);
-    expect(
+    ).resolves.toBe(true);
+    await expect(
       createSecretEncryptor(storage(true, "basic_text"), "darwin")
         .isEncryptionAvailable(),
-    ).toBe(true);
+    ).resolves.toBe(true);
   });
 
-  it("still refuses when the platform reports no encryption at all", () => {
-    expect(
+  it("still refuses when the platform reports no encryption at all", async () => {
+    await expect(
       createSecretEncryptor(storage(false), "darwin").isEncryptionAvailable(),
-    ).toBe(false);
+    ).resolves.toBe(false);
   });
 
   it("names the remedy on Linux and stays generic elsewhere", () => {
