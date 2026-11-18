@@ -133,3 +133,8 @@ host Git identity inheritance is recorded in
 [ADR 0009](docs/adr/0009-safe-host-git-configuration.md). Target-owned Docker
 VMs and the decision not to expose a shared host daemon are documented in
 [ADR 0010](docs/adr/0010-target-owned-container-runtimes.md).
+The versioned contribution, permission, and lifecycle boundary for optional
+capabilities is described in [extensions](docs/extensions.md),
+[ADR 0011](docs/adr/0011-secure-extension-contract.md), and the
+[extension threat model](docs/extension-security.md). This is currently a
+contract only; OpsCapsule does not load third-party extension code.
