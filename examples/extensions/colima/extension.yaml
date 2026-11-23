@@ -1,0 +1,77 @@
+apiVersion: opscapsule.dev/v1alpha1
+kind: Extension
+
+metadata:
+  id: dev.opscapsule.colima
+  name: Isolated Docker runtime
+  version: 1.0.0
+  publisher: OpsCapsule
+  description: Provides a target-owned Docker engine through Colima.
+
+compatibility:
+  hostApi: opscapsule.dev/extension-host/v1alpha1
+  opscapsule: ">=0.5.0 <1.0.0"
+  platforms:
+    - darwin-arm64
+    - darwin-x64
+
+execution:
+  mode: built-in
+
+contributes:
+  settings: []
+  readinessChecks:
+    - id: colima-installed
+      label: Colima installed
+      scope: target
+    - id: docker-cli-installed
+      label: Docker CLI installed
+      scope: target
+  actions:
+    - id: reset-runtime
+      label: Reset Docker environment
+      scope: target
+      risk: destructive
+  taskSources: []
+  contextSources: []
+  targetServices:
+    - id: docker-runtime
+      label: Docker runtime
+      scope: target
+      contract: opscapsule.dev/container-runtime/v1alpha1
+
+permissions:
+  host:
+    privateState:
+      - target
+    commands:
+      - id: colima
+        label: Colima
+        command: colima
+        scope: target
+      - id: docker
+        label: Docker CLI
+        command: docker
+        scope: target
+    network:
+      - id: runtime-egress
+        label: Container runtime network
+        scope: target
+        mode: public
+        allowedDomains: []
+    targetDirectories:
+      - id: target-mounts
+        label: Configured target directories
+        scope: target
+        access: declared
+    credentials: []
+  capsule:
+    sockets:
+      - id: docker-socket
+        label: Target Docker socket
+        scope: target
+    environment:
+      - name: DOCKER_HOST
+        scope: target
+      - name: DOCKER_CONFIG
+        scope: target
